@@ -1,0 +1,39 @@
+{
+  "mechanism": {
+    "project_name": "Linkage_System_01",
+    "links": [
+      {
+        "id": "A",
+        "type": "Ground",
+        "length": 150.0,
+        "fixed": true
+      },
+      {
+        "id": "B",
+        "type": "Crank",
+        "length": 50.0,
+		"fixed": false,
+        "input_angle": 45.0
+      },
+      {
+        "id": "C",
+        "type": "Coupler",
+		"fixed": false,
+        "length": 120.0
+      },
+      {
+        "id": "D",
+        "type": "Rocker",
+		"fixed": false,
+        "length": 90.0
+      }
+    ],
+	
+    "joints": [
+      {"type": "Revolute", "pair": ["A", "B"], "origin": [0, 0]},
+      {"type": "Revolute", "pair": ["B", "C"]},
+      {"type": "Revolute", "pair": ["C", "D"]},
+      {"type": "Revolute", "pair": ["D", "A"], "origin": [150, 0]}
+    ]
+  }
+}

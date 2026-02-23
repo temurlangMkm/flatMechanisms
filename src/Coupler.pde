@@ -1,4 +1,5 @@
-class Coupler extends Element {
+
+class Link extends Element {
   //Шатун (Connecting rod, Coupler)
   //Подвижное звено, соединяющее два других подвижных звена.
   //Не закреплено к стойке напрямую.
@@ -10,7 +11,7 @@ class Coupler extends Element {
   float h, d;
   Element Crank, Rocker;
 
-  Coupler (Dot d1, Dot d2, Element Crank, Element Rocker, boolean firstPointLeading) {
+  Link (Dot d1, Dot d2, Element Crank, Element Rocker, boolean firstPointLeading) {
     super(d1, d2, firstPointLeading);
     this.Crank = Crank;
     this.Rocker = Rocker;

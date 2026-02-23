@@ -14,19 +14,23 @@ void setup() {
   
   dots.add(new Dot(273, 296, true));      //E
   
+  dots.add(new Dot(779, 500, true)); 
+  
   dots.add(new Dot(779, 500, true)); //F
 
   elements.add(new Crank(dots.get(0), dots.get(1), 0.01, true, true));         // Кривошип (Crank)
   elements.add(new Rocker(dots.get(2), dots.get(3), true));                    // Коромысло (Rocker)
-  elements.add(new Coupler(dots.get(1), dots.get(2), elements.get(0), elements.get(1), true)); // Шатун (Coupler)
+  elements.add(new Link(dots.get(1), dots.get(2), elements.get(0), elements.get(1), true)); // Шатун (Coupler)
   elements.add(new Slider(dots.get(4), dots.get(5), true));  // Ползун (Slider)
   elements.get(2).setDot(dots.get(4),230); //add point E
+  elements.get(1).setDot(dots.get(5),230); //add point G
   
 }
 
 void draw() {
   frameRate(60);
   background(20);
+  
 
   line(376,500,width,500);
   
