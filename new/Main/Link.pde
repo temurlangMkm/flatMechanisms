@@ -1,5 +1,7 @@
 abstract class Link {
-
+  
+  HashMap<String, PVector> positions = new HashMap<String, PVector>(); //for Ground
+  
   PVector pos = new PVector(0, 0);
 
   Link driver;
@@ -20,7 +22,6 @@ abstract class Link {
     this.id = name;
     this.mobile = true;
     this.len = len;
-    c = #26D127;
   }
 
   void setPos(float x, float y) {
@@ -33,11 +34,7 @@ abstract class Link {
     driver = d;
   }
 
-  void setR(float radius) {
-    r = radius;
-  }
-
-  void setName(String n) {
+  void setNewName(String n) {
     id = n;
   }
 
@@ -51,6 +48,9 @@ abstract class Link {
   }
 
   void display() {
-    ellipse(pos.x, pos.y, r, r);
+    line(driver.pos.x, driver.pos.y, pos.x, pos.y);
   }
+  
+  void addPos(String driven, float x, float y){} //for Ground
+  abstract void update();
 }
