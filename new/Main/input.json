@@ -12,19 +12,16 @@
         "id": "B",
         "type": "Crank",
         "length": 50.0,
-		"fixed": false,
         "input_angle": 45.0
       },
       {
         "id": "C",
         "type": "Coupler",
-		"fixed": false,
         "length": 120.0
       },
       {
         "id": "D",
         "type": "Rocker",
-		"fixed": false,
         "length": 90.0
       }
     ],

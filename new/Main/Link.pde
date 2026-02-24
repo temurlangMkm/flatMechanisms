@@ -3,6 +3,7 @@ abstract class Link {
   PVector pos = new PVector(0, 0);
 
   Link driver;
+  String type;
 
   String id;
   color c;
