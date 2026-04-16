@@ -1,0 +1,85 @@
+{
+  "crankSpeed": 2,
+  "nodes": [
+    {
+      "id": "A",
+      "type": "support",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "type": "support",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "type": "joint"
+    },
+    {
+      "id": "D",
+      "type": "joint"
+    },
+    {
+      "id": "E",
+      "type": "onLink",
+      "link": "coupler",
+      "distance": 60,
+      "orthogonal": -40
+    },
+    {
+      "id": "F",
+      "type": "slider",
+      "line": {
+        "p1": [
+          -50,
+          -100
+        ],
+        "p2": [
+          200,
+          -100
+        ]
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "crank",
+      "from": "A",
+      "to": "C",
+      "length": 40
+    },
+    {
+      "id": "coupler",
+      "type": "rod",
+      "from": "C",
+      "to": "D",
+      "length": 120
+    },
+    {
+      "type": "rocker",
+      "from": "B",
+      "to": "D",
+      "length": 80
+    },
+    {
+      "type": "rod",
+      "from": "C",
+      "to": "E",
+      "length": 0
+    },
+    {
+      "type": "rod",
+      "from": "D",
+      "to": "E",
+      "length": 0
+    },
+    {
+      "type": "rod",
+      "from": "E",
+      "to": "F",
+      "length": 100
+    }
+  ]
+}

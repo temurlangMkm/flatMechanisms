@@ -1,0 +1,111 @@
+/* =========================================
+   ОСНОВНОЙ ФОН
+   ========================================= */
+.root {
+    -fx-background-color: #f4f5f7; /* Светло-серый, матовый фон */
+}
+
+/* =========================================
+   КНОПКИ (Строгий плоский дизайн)
+   ========================================= */
+.button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #333333;
+    -fx-font-family: "Segoe UI", "Arial", sans-serif;
+    -fx-font-size: 13px;
+    -fx-font-weight: normal;
+
+    /* Минимальные закругления для строгости */
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+
+    /* Тонкая серая рамка */
+    -fx-border-color: #cccccc;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+    -fx-transition: -fx-background-color 0.15s;
+}
+
+.button:hover {
+    -fx-background-color: #e9ecef;
+    -fx-border-color: #b3b3b3;
+}
+
+.button:pressed {
+    -fx-background-color: #dee2e6;
+}
+
+/* Run/Pause - Строгий зеленый акцент */
+#RunB {
+    -fx-border-color: #28a745;
+    -fx-text-fill: #155724;
+}
+#RunB:hover {
+    -fx-background-color: #d4edda;
+}
+
+/* Restart - Строгий красный акцент */
+#RestartB {
+    -fx-border-color: #dc3545;
+    -fx-text-fill: #721c24;
+}
+#RestartB:hover {
+    -fx-background-color: #f8d7da;
+}
+
+/* Load JSON - Строгий синий акцент */
+#LoadB {
+    -fx-border-color: #007bff;
+    -fx-text-fill: #004085;
+}
+#LoadB:hover {
+    -fx-background-color: #cce5ff;
+}
+
+/* =========================================
+   ТЕКСТОВОЕ ПОЛЕ (Классический редактор)
+   ========================================= */
+.text-area {
+    -fx-background-color: #cccccc; /* Цвет внешней рамки */
+    -fx-background-insets: 0;
+    -fx-background-radius: 3;
+    -fx-padding: 1;
+}
+
+.text-area .content {
+    -fx-background-color: #ffffff; /* Чисто белый фон для текста */
+    -fx-background-radius: 2;
+}
+
+.text-area .text {
+    -fx-fill: #24292e; /* Темно-серый текст, как в GitHub */
+    -fx-font-family: "Consolas", "Courier New", monospace;
+    -fx-font-size: 13px;
+}
+
+/* Строгая синяя рамка при выделении поля */
+.text-area:focused {
+    -fx-background-color: #0056b3;
+}
+
+/* Стилизация скроллбара под светлую тему */
+.text-area .scroll-bar:vertical,
+.text-area .scroll-bar:horizontal {
+    -fx-background-color: #f8f9fa;
+    -fx-border-color: #e9ecef;
+}
+.text-area .thumb {
+    -fx-background-color: #ced4da;
+    -fx-background-radius: 0; /* Квадратный ползунок */
+}
+.text-area .thumb:hover {
+    -fx-background-color: #adb5bd;
+}
+
+/* =========================================
+   CANVAS (Рабочая область)
+   ========================================= */
+#Canvas {
+    /* Легкая тень, создающая эффект "листа бумаги", лежащего на фоне */
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.15), 10, 0.0, 0, 3);
+}
