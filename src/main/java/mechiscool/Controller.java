@@ -29,6 +29,7 @@ public class Controller {
     private AnimationTimer animationTimer;
     private long lastFrameNanos;
     private boolean running;
+    private boolean controlsInitialized = false;
 
     @FXML
     private TextArea contentInput;
@@ -108,6 +109,12 @@ public class Controller {
                 currentConfig = configLoader.load(jsonText);
                 currentJsonText = jsonText;
                 simulation = new MechanismSimulation(currentConfig);
+
+                // Интеграция управления зумом и панорамированием
+                if (!controlsInitialized) {
+                    canvasRenderer.initializeControls(myCanvas, currentConfig, simulation.getPositions());
+                    controlsInitialized = true;
+                }
             }
             drawRunState();
             startAnimation();

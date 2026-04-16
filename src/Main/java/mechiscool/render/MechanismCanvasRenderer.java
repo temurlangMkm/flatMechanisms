@@ -2,20 +2,20 @@ package mechiscool.render;
 
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.paint.Color;
 import mechiscool.json.LinkConfig;
 import mechiscool.json.MechanismConfig;
 import mechiscool.json.NodeConfig;
-import mechiscool.json.SliderLineConfig;
 
-import java.util.ArrayList;
-import java.util.DoubleSummaryStatistics;
-import java.util.List;
 import java.util.Map;
 
 public class MechanismCanvasRenderer {
-    private static final double PADDING = 40;
     private static final double NODE_RADIUS = 6;
+    private final Viewport viewport = new Viewport();
+    private double lastMouseX;
+    private double lastMouseY;
 
     private static final Color COLOR_BG = Color.rgb(247, 247, 244);
     private static final Color COLOR_GUIDE = Color.rgb(150, 150, 150);
@@ -29,15 +29,38 @@ public class MechanismCanvasRenderer {
     private static final Color COLOR_ON_LINK = Color.rgb(131, 66, 148);
     private static final Color COLOR_NODE_DEFAULT_STROKE = Color.rgb(33, 33, 33);
 
-    public void render(Canvas canvas, MechanismConfig config) {
-        render(canvas, config, MechanismLayoutSolver.createInitialPositions(config));
+    public void initializeControls(Canvas canvas, MechanismConfig config, Map<String, Point2> positions) {
+        canvas.addEventHandler(MouseEvent.MOUSE_PRESSED, event -> {
+            lastMouseX = event.getX();
+            lastMouseY = event.getY();
+        });
+
+        canvas.addEventHandler(MouseEvent.MOUSE_DRAGGED, event -> {
+            double deltaX = event.getX() - lastMouseX;
+            double deltaY = event.getY() - lastMouseY;
+            viewport.offsetX += deltaX;
+            viewport.offsetY += deltaY;
+            lastMouseX = event.getX();
+            lastMouseY = event.getY();
+            render(canvas, config, positions);
+        });
+
+        canvas.addEventHandler(ScrollEvent.SCROLL, event -> {
+            double zoomFactor = event.getDeltaY() > 0 ? 1.1 : 0.9;
+            Point2 mouseWorldBefore = viewport.toWorld(event.getX(), event.getY());
+
+            viewport.scale *= zoomFactor;
+
+            viewport.offsetX = event.getX() - mouseWorldBefore.x() * viewport.scale;
+            viewport.offsetY = event.getY() - mouseWorldBefore.y() * viewport.scale;
+
+            render(canvas, config, positions);
+        });
     }
 
     public void render(Canvas canvas, MechanismConfig config, Map<String, Point2> positions) {
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         drawBackground(graphics, canvas);
-        Viewport viewport = createViewport(canvas, config, positions);
-
         drawSliderGuides(graphics, config, viewport);
         drawLinks(graphics, config, positions, viewport);
         drawNodes(graphics, config, positions, viewport);
@@ -47,36 +70,6 @@ public class MechanismCanvasRenderer {
     private void drawBackground(GraphicsContext graphics, Canvas canvas) {
         graphics.setFill(COLOR_BG);
         graphics.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-    }
-
-    private Viewport createViewport(Canvas canvas, MechanismConfig config, Map<String, Point2> positions) {
-        List<Point2> points = new ArrayList<>(positions.values());
-        for (NodeConfig node : config.getNodes()) {
-            if ("slider".equals(node.getType()) && node.getLine() != null) {
-                SliderLineConfig line = node.getLine();
-                Point2 p1 = MechanismLayoutSolver.arrayPoint(line.getP1());
-                Point2 p2 = MechanismLayoutSolver.arrayPoint(line.getP2());
-                if (p1 != null) points.add(p1);
-                if (p2 != null) points.add(p2);
-            }
-        }
-
-        if (points.isEmpty()) {
-            return new Viewport(1, PADDING, PADDING);
-        }
-
-        DoubleSummaryStatistics statsX = points.stream().mapToDouble(Point2::x).summaryStatistics();
-        DoubleSummaryStatistics statsY = points.stream().mapToDouble(Point2::y).summaryStatistics();
-
-        double width = Math.max(1, statsX.getMax() - statsX.getMin());
-        double height = Math.max(1, statsY.getMax() - statsY.getMin());
-        double scaleX = (canvas.getWidth() - PADDING * 2) / width;
-        double scaleY = (canvas.getHeight() - PADDING * 2) / height;
-        double scale = Math.min(scaleX, scaleY);
-
-        double offsetX = (canvas.getWidth() - width * scale) / 2.0 - statsX.getMin() * scale;
-        double offsetY = (canvas.getHeight() - height * scale) / 2.0 - statsY.getMin() * scale;
-        return new Viewport(scale, offsetX, offsetY);
     }
 
     private void drawSliderGuides(GraphicsContext graphics, MechanismConfig config, Viewport viewport) {
@@ -169,9 +162,17 @@ public class MechanismCanvasRenderer {
         graphics.fillText("nodes: " + config.getNodes().size() + "  links: " + config.getLinks().size(), 150, 20);
     }
 
-    private record Viewport(double scale, double offsetX, double offsetY) {
-        private Point2 toCanvas(Point2 source) {
+    private static class Viewport {
+        double scale = 1.0;
+        double offsetX = 40;
+        double offsetY = 40;
+
+        Point2 toCanvas(Point2 source) {
             return new Point2(source.x() * scale + offsetX, source.y() * scale + offsetY);
+        }
+
+        Point2 toWorld(double x, double y) {
+            return new Point2((x - offsetX) / scale, (y - offsetY) / scale);
         }
     }
 }

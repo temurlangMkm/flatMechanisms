@@ -7,7 +7,6 @@ import mechiscool.json.NodeConfig;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -24,6 +23,7 @@ public final class MechanismLayoutSolver {
                 .collect(Collectors.toMap(LinkConfig::getId, Function.identity()));
 
         Map<String, Point2> positions = new HashMap<>();
+
         config.getNodes().forEach(node -> {
             Point2 seed = seedPoint(node);
             if (seed != null) {
@@ -38,11 +38,12 @@ public final class MechanismLayoutSolver {
             for (LinkConfig link : config.getLinks()) {
                 Point2 from = positions.get(link.getFrom());
                 Point2 to = positions.get(link.getTo());
+
                 if (from != null && to == null) {
-                    positions.put(link.getTo(), placeAtDistance(from, preferredPoint(nodesById.get(link.getTo())), link.getLength()));
+                    positions.put(link.getTo(), placeAtDistance(from, seedPoint(nodesById.get(link.getTo())), link.getLength()));
                     changed = true;
                 } else if (from == null && to != null) {
-                    positions.put(link.getFrom(), placeAtDistance(to, preferredPoint(nodesById.get(link.getFrom())), link.getLength()));
+                    positions.put(link.getFrom(), placeAtDistance(to, seedPoint(nodesById.get(link.getFrom())), link.getLength()));
                     changed = true;
                 }
             }
@@ -51,7 +52,7 @@ public final class MechanismLayoutSolver {
                 if ("onLink".equals(node.getType()) && !positions.containsKey(node.getId())) {
                     LinkConfig baseLink = linksById.get(node.getLink());
                     if (baseLink != null && positions.containsKey(baseLink.getFrom()) && positions.containsKey(baseLink.getTo())) {
-                        positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), defaultValue(node.getOrthogonal())));
+                        positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), node.getOrthogonal()));
                         changed = true;
                     }
                 }
@@ -73,14 +74,19 @@ public final class MechanismLayoutSolver {
                 .forEach(node -> {
                     LinkConfig baseLink = linksById.get(node.getLink());
                     if (baseLink != null && positions.containsKey(baseLink.getFrom()) && positions.containsKey(baseLink.getTo())) {
-                        positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), defaultValue(node.getOrthogonal())));
+                        positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), node.getOrthogonal()));
                     }
                 });
     }
 
     public static Point2 seedPoint(NodeConfig node) {
-        if (node.getX() != null && node.getY() != null) {
-            return new Point2(node.getX(), node.getY());
+        if (node == null) {
+            return null;
+        }
+        Double x = node.getX();
+        Double y = node.getY();
+        if (x != null && y != null) {
+            return new Point2(x, y);
         }
         if ("slider".equals(node.getType()) && node.getLine() != null) {
             Point2 p1 = arrayPoint(node.getLine().getP1());
@@ -90,10 +96,6 @@ public final class MechanismLayoutSolver {
             }
         }
         return null;
-    }
-
-    public static Point2 preferredPoint(NodeConfig node) {
-        return node != null ? seedPoint(node) : null;
     }
 
     public static Point2 arrayPoint(double[] values) {
@@ -108,14 +110,12 @@ public final class MechanismLayoutSolver {
         return anchor.add(direction.multiply(distance));
     }
 
-    public static Point2 pointOnLink(Point2 from, Point2 to, double distance, double orthogonal) {
+    public static Point2 pointOnLink(Point2 from, Point2 to, Double distance, Double orthogonal) {
+        double distVal = distance != null ? distance : 0.0;
+        double orthVal = orthogonal != null ? orthogonal : 0.0;
         Point2 axis = to.subtract(from).normalize();
         Point2 normal = axis.perpendicularLeft();
-        return from.add(axis.multiply(distance)).add(normal.multiply(orthogonal));
-    }
-
-    public static double defaultValue(Double value) {
-        return Objects.requireNonNullElse(value, 0.0);
+        return from.add(axis.multiply(distVal)).add(normal.multiply(orthVal));
     }
 
     private static void fillFallbackPositions(MechanismConfig config, Map<String, Point2> positions) {
