@@ -12,5 +12,7 @@
       <Button id="RestartB" fx:id="restartB" layoutX="104.0" layoutY="14.0" mnemonicParsing="false" text="Restart" />
       <Button id="RunB" fx:id="runB" layoutX="14.0" layoutY="14.0" mnemonicParsing="false" text="Run/Pause" />
       <Button id="LoadB" fx:id="loadB" layoutX="14.0" layoutY="54.0" mnemonicParsing="false" prefHeight="25.0" prefWidth="143.0" text="Load JSON" />
+      <Button fx:id="velocityDiagramB" layoutX="221.0" layoutY="14.0" mnemonicParsing="false" text="Velocity Diagram" />
+      <Button fx:id="accelerationDiagramB" layoutX="341.0" layoutY="14.0" mnemonicParsing="false" text="Acceleration Diagram" />
    </children>
 </AnchorPane>

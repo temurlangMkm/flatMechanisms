@@ -2,23 +2,28 @@ package mechiscool;
 
 import javafx.animation.AnimationTimer;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.TextArea;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 import javafx.stage.Window;
 import mechiscool.render.MechanismCanvasRenderer;
 import mechiscool.render.MechanismSimulation;
 import mechiscool.json.MechanismConfig;
 import mechiscool.json.MechanismConfigLoader;
+import mechiscool.render.Point2;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Map;
 
 public class Controller {
     private final MechanismConfigLoader configLoader = new MechanismConfigLoader();
@@ -30,6 +35,11 @@ public class Controller {
     private long lastFrameNanos;
     private boolean running;
     private boolean controlsInitialized = false;
+
+    private Stage velocityStage;
+    private Canvas velocityCanvas;
+    private Stage accelerationStage;
+    private Canvas accelerationCanvas;
 
     @FXML
     private TextArea contentInput;
@@ -47,13 +57,42 @@ public class Controller {
     private Button runB;
 
     @FXML
+    private Button velocityDiagramB;
+
+    @FXML
+    private Button accelerationDiagramB;
+
+    @FXML
     private void initialize() {
         loadB.setOnAction(event -> loadJsonFromFile());
         runB.setOnAction(event -> toggleRunPause());
         restartB.setOnAction(event -> restartSimulation());
+        
+        velocityDiagramB.setOnAction(event -> openDiagramWindow("Velocity Plan (v)", Color.BLUE, true));
+        accelerationDiagramB.setOnAction(event -> openDiagramWindow("Acceleration Plan (a)", Color.RED, false));
+
         drawPlaceholder();
         createAnimationTimer();
         runB.setText("Run");
+    }
+
+    private void openDiagramWindow(String title, Color color, boolean isVelocity) {
+        Stage stage = new Stage();
+        stage.setTitle(title);
+        Canvas canvas = new Canvas(500, 500);
+        StackPane root = new StackPane(canvas);
+        stage.setScene(new Scene(root));
+        stage.show();
+
+        if (isVelocity) {
+            velocityStage = stage;
+            velocityCanvas = canvas;
+        } else {
+            accelerationStage = stage;
+            accelerationCanvas = canvas;
+        }
+        
+        updateDiagrams();
     }
 
     private void loadJsonFromFile() {
@@ -110,7 +149,6 @@ public class Controller {
                 currentJsonText = jsonText;
                 simulation = new MechanismSimulation(currentConfig);
 
-                // Интеграция управления зумом и панорамированием
                 if (!controlsInitialized) {
                     canvasRenderer.initializeControls(myCanvas, currentConfig, simulation.getPositions());
                     controlsInitialized = true;
@@ -137,7 +175,19 @@ public class Controller {
         if (simulation == null || currentConfig == null) {
             return;
         }
-        canvasRenderer.render(myCanvas, currentConfig, simulation.getPositions());
+        canvasRenderer.render(myCanvas, currentConfig, simulation.getPositions(), Map.of(), Map.of());
+        updateDiagrams();
+    }
+
+    private void updateDiagrams() {
+        if (simulation == null || currentConfig == null) return;
+
+        if (velocityStage != null && velocityStage.isShowing()) {
+            canvasRenderer.renderDiagram(velocityCanvas, currentConfig, simulation.getVelocities(), Color.BLUE, "Velocity Plan", "m/s");
+        }
+        if (accelerationStage != null && accelerationStage.isShowing()) {
+            canvasRenderer.renderDiagram(accelerationCanvas, currentConfig, simulation.getAccelerations(), Color.RED, "Acceleration Plan", "m/s²");
+        }
     }
 
     private void createAnimationTimer() {

@@ -4,11 +4,7 @@ import mechiscool.json.LinkConfig;
 import mechiscool.json.MechanismConfig;
 import mechiscool.json.NodeConfig;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class MechanismSimulation {
     private static final int MAX_SOLVE_ITERATIONS = 15;
@@ -19,8 +15,7 @@ public class MechanismSimulation {
     private final List<SimLink> links = new ArrayList<>();
     private final List<SimLink> cranks = new ArrayList<>();
     private final List<SimLink> rods = new ArrayList<>();
-    private final Map<String, Point2> positions = new LinkedHashMap<>();
-
+    
     private double phase;
 
     public MechanismSimulation(MechanismConfig config) {
@@ -29,51 +24,11 @@ public class MechanismSimulation {
         reset();
     }
 
-    public void reset() {
-        phase = 0;
-        for (SimNode node : nodesById.values()) {
-            Point2 seed = MechanismLayoutSolver.seedPoint(node.config());
-            if (seed == null) {
-                seed = new Point2(0, 0);
-            }
-            node.setPosition(seed);
-            node.setPreviousPosition(seed);
-            node.setSolved("support".equals(node.type()));
-        }
-
-        for (SimLink link : cranks) {
-            if (!link.to().solved()) {
-                Point2 from = link.from().position();
-                double angle = link.angleOffset();
-                Point2 crankPoint = from.add(new Point2(Math.cos(angle), Math.sin(angle)).multiply(link.length()));
-                link.to().setPosition(crankPoint);
-                link.to().setPreviousPosition(crankPoint);
-            }
-        }
-        solveCurrentState(0.0);
-    }
-
-    public Map<String, Point2> getPositions() {
-        positions.clear();
-        for (SimNode node : nodesById.values()) {
-            positions.put(node.id(), node.position());
-        }
-        return Map.copyOf(positions);
-    }
-
-    public void step(double deltaSeconds) {
-        if (deltaSeconds > 0) {
-            solveCurrentState(deltaSeconds);
-        }
-    }
-
     private void init() {
         for (NodeConfig node : config.getNodes()) {
             Point2 seed = MechanismLayoutSolver.seedPoint(node);
-            if (seed == null) {
-                seed = new Point2(0, 0);
-            }
-            nodesById.put(node.getId(), new SimNode(node, seed, seed, "support".equals(node.getType())));
+            if (seed == null) seed = new Point2(0, 0);
+            nodesById.put(node.getId(), new SimNode(node, seed, "support".equals(node.getType())));
         }
 
         int index = 0;
@@ -81,268 +36,369 @@ public class MechanismSimulation {
             SimNode from = nodesById.get(linkConfig.getFrom());
             SimNode to = nodesById.get(linkConfig.getTo());
             String id = (linkConfig.getId() == null || linkConfig.getId().isBlank()) ? "link_" + index : linkConfig.getId();
-            double angleOffset = computeAngleOffset(from, to);
+            double angleOffset = computeInitialAngle(from, to);
             SimLink link = new SimLink(id, linkConfig, from, to, angleOffset);
             links.add(link);
-            if ("crank".equals(link.type())) {
-                cranks.add(link);
-            } else {
-                rods.add(link);
-            }
+            if ("crank".equals(link.type())) cranks.add(link);
+            else rods.add(link);
             index++;
         }
     }
 
-    private void solveCurrentState(double deltaSeconds) {
-        double speed =  config.getCrankSpeed();
-        phase = (phase + deltaSeconds * speed) % TWO_PI;
-        if (phase < 0) phase += TWO_PI;
-
+    public void reset() {
+        phase = 0;
         for (SimNode node : nodesById.values()) {
-            node.setPreviousPosition(node.position());
-            if ("support".equals(node.type())) {
-                Point2 fixed = Objects.requireNonNullElse(MechanismLayoutSolver.seedPoint(node.config()), node.position());
-                node.setPosition(fixed);
-                node.setSolved(true);
-            } else {
-                node.setSolved(false);
-            }
+            Point2 seed = MechanismLayoutSolver.seedPoint(node.config());
+            node.position = (seed != null) ? seed : new Point2(0, 0);
+            node.velocity = new Point2(0, 0);
+            node.acceleration = new Point2(0, 0);
+            node.solved = "support".equals(node.type());
+        }
+        solveState(0);
+    }
+
+    public void step(double dt) {
+        solveState(dt);
+    }
+
+    private void solveState(double dt) {
+        double omega = config.getCrankSpeed();
+        phase = (phase + dt * omega) % TWO_PI;
+
+        // 1. Positions (Iterative geometry solver)
+        solvePositions();
+
+        // 2. Velocities (Analytical Vector Plan)
+        solveVelocities(omega);
+
+        // 3. Accelerations (Analytical Vector Plan)
+        solveAccelerations(omega);
+    }
+
+    private void solvePositions() {
+        for (SimNode node : nodesById.values()) {
+            node.solved = "support".equals(node.type());
         }
 
         for (SimLink crank : cranks) {
-            if (crank.from().solved()) {
-                double angle = (phase + crank.angleOffset()) % TWO_PI;
-                Point2 from = crank.from().position();
-                Point2 to = from.add(new Point2(Math.cos(angle), Math.sin(angle)).multiply(crank.length()));
-                crank.to().setPosition(to);
-                crank.to().setSolved(true);
-            }
+            double angle = (phase + crank.angleOffset) % TWO_PI;
+            crank.to.position = crank.from.position.add(new Point2(Math.cos(angle), Math.sin(angle)).multiply(crank.length()));
+            crank.to.solved = true;
         }
 
-        boolean madeProgress = true;
-        int iteration = 0;
-        while (madeProgress && iteration < MAX_SOLVE_ITERATIONS) {
-            madeProgress = false;
-            iteration++;
-
+        for (int i = 0; i < MAX_SOLVE_ITERATIONS; i++) {
+            boolean progress = false;
             for (SimNode node : nodesById.values()) {
-                if (node.solved()) {
-                    continue;
-                }
-                List<SimLink> connectedLinks = solvedConnectedRods(node);
-                boolean solvedNow = switch (node.type()) {
-                    case "slider" -> solveSlider(node, connectedLinks);
-                    case "onLink" -> solveOnLink(node);
-                    case "joint" -> solveJoint(node, connectedLinks);
-                    default -> false;
-                };
-                if (solvedNow) {
-                    madeProgress = true;
-                }
+                if (node.solved) continue;
+                if (trySolveNodePosition(node)) progress = true;
+            }
+            if (!progress) break;
+        }
+    }
+
+    private boolean trySolveNodePosition(SimNode node) {
+        List<SimLink> connected = getSolvedLinks(node);
+        if (node.type().equals("joint") && connected.size() >= 2) {
+            SimLink l1 = connected.get(0);
+            SimLink l2 = connected.get(1);
+            SimNode c1 = l1.other(node);
+            SimNode c2 = l2.other(node);
+            List<Point2> pts = circleCircleIntersect(c1.position, l1.length(), c2.position, l2.length());
+            if (!pts.isEmpty()) {
+                node.position = pickClosest(pts, node.position);
+                node.solved = true;
+                return true;
+            }
+        } else if (node.type().equals("slider") && !connected.isEmpty()) {
+            SimLink l = connected.get(0);
+            SimNode c = l.other(node);
+            Point2 p1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
+            Point2 p2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
+            List<Point2> pts = circleLineIntersect(c.position, l.length(), p1, p2);
+            if (!pts.isEmpty()) {
+                node.position = pickClosest(pts, node.position);
+                node.solved = true;
+                return true;
+            }
+        } else if (node.type().equals("onLink")) {
+            SimLink link = findLinkById(node.config().getLink());
+            if (link != null && link.from.solved && link.to.solved) {
+                Point2 dir = link.to.position.subtract(link.from.position).normalize();
+                Point2 norm = dir.perpendicularLeft();
+                double d = node.config().getDistance() != null ? node.config().getDistance() : 0;
+                double o = node.config().getOrthogonal() != null ? node.config().getOrthogonal() : 0;
+                node.position = link.from.position.add(dir.multiply(d)).add(norm.multiply(o));
+                node.solved = true;
+                return true;
             }
         }
+        return false;
+    }
 
+    private void solveVelocities(double omega) {
         for (SimNode node : nodesById.values()) {
-            if (!node.solved() && "onLink".equals(node.type())) {
-                solveOnLink(node);
+            node.velocity = new Point2(0, 0);
+            node.vSolved = "support".equals(node.type());
+        }
+
+        // Crank tips: V = omega * R (perpendicular to R)
+        for (SimLink crank : cranks) {
+            Point2 r = crank.to.position.subtract(crank.from.position);
+            crank.to.velocity = r.perpendicularLeft().multiply(omega);
+            crank.to.vSolved = true;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            boolean progress = false;
+            for (SimNode node : nodesById.values()) {
+                if (node.vSolved) continue;
+                if (trySolveVelocity(node)) progress = true;
+            }
+            if (!progress) break;
+        }
+    }
+
+    private boolean trySolveVelocity(SimNode node) {
+        List<SimLink> connected = getVSolvedLinks(node);
+        if (node.type().equals("joint") && connected.size() >= 2) {
+            // V_node = V_a + V_node/a, where V_node/a perpendicular to Link(a,node)
+            SimLink l1 = connected.get(0);
+            SimLink l2 = connected.get(1);
+            Point2 p1 = l1.other(node).velocity;
+            Point2 v1 = node.position.subtract(l1.other(node).position).perpendicularLeft();
+            Point2 p2 = l2.other(node).velocity;
+            Point2 v2 = node.position.subtract(l2.other(node).position).perpendicularLeft();
+            Point2 res = Point2.intersect(p1, v1, p2, v2);
+            if (res != null) {
+                node.velocity = res;
+                node.vSolved = true;
+                return true;
+            }
+        } else if (node.type().equals("slider") && !connected.isEmpty()) {
+            SimLink l = connected.get(0);
+            Point2 p1 = l.other(node).velocity;
+            Point2 v1 = node.position.subtract(l.other(node).position).perpendicularLeft();
+            // Slider velocity must be along its guide line
+            Point2 lineP1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
+            Point2 lineP2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
+            Point2 vGuide = lineP2.subtract(lineP1);
+            Point2 res = Point2.intersect(p1, v1, new Point2(0,0), vGuide);
+            if (res != null) {
+                node.velocity = res;
+                node.vSolved = true;
+                return true;
+            }
+        } else if (node.type().equals("onLink")) {
+            SimLink link = findLinkById(node.config().getLink());
+            if (link != null && link.from.vSolved && link.to.vSolved) {
+                // Theorem of similarity: v_p = v_a + (v_b - v_a) * (AP/AB) + ...
+                Point2 va = link.from.velocity;
+                Point2 vb = link.to.velocity;
+                Point2 ab = link.to.position.subtract(link.from.position);
+                Point2 ap = node.position.subtract(link.from.position);
+                double lenSq = ab.dot(ab);
+                if (lenSq > 1e-9) {
+                    double mu = ap.dot(ab) / lenSq;
+                    double nu = ap.dot(ab.perpendicularLeft()) / lenSq;
+                    Point2 relV = vb.subtract(va);
+                    node.velocity = va.add(relV.multiply(mu)).add(relV.perpendicularLeft().multiply(nu));
+                    node.vSolved = true;
+                    return true;
+                }
             }
         }
+        return false;
     }
 
-    private List<SimLink> solvedConnectedRods(SimNode node) {
-        List<SimLink> connected = new ArrayList<>();
-        for (SimLink link : rods) {
-            if (link.from() == node && link.to().solved()) {
-                connected.add(link);
-            } else if (link.to() == node && link.from().solved()) {
-                connected.add(link);
+    private void solveAccelerations(double omega) {
+        for (SimNode node : nodesById.values()) {
+            node.acceleration = new Point2(0, 0);
+            node.aSolved = "support".equals(node.type());
+        }
+
+        // Crank tips: a = a_normal + a_tau. If omega = const, a_tau = 0.
+        // a_normal = omega^2 * R (towards center)
+        for (SimLink crank : cranks) {
+            Point2 r = crank.to.position.subtract(crank.from.position);
+            crank.to.acceleration = r.multiply(-omega * omega);
+            crank.to.aSolved = true;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            boolean progress = false;
+            for (SimNode node : nodesById.values()) {
+                if (node.aSolved) continue;
+                if (trySolveAcceleration(node)) progress = true;
+            }
+            if (!progress) break;
+        }
+    }
+
+    private boolean trySolveAcceleration(SimNode node) {
+        List<SimLink> connected = getASolvedLinks(node);
+        if (node.type().equals("joint") && connected.size() >= 2) {
+            // a_B = a_A + a_BA_n + a_BA_tau
+            SimLink l1 = connected.get(0);
+            SimLink l2 = connected.get(1);
+            
+            Point2 acc1 = calculateKnownAccPart(node, l1);
+            Point2 dir1 = node.position.subtract(l1.other(node).position).perpendicularLeft();
+            
+            Point2 acc2 = calculateKnownAccPart(node, l2);
+            Point2 dir2 = node.position.subtract(l2.other(node).position).perpendicularLeft();
+            
+            Point2 res = Point2.intersect(acc1, dir1, acc2, dir2);
+            if (res != null) {
+                node.acceleration = res;
+                node.aSolved = true;
+                return true;
+            }
+        } else if (node.type().equals("slider") && !connected.isEmpty()) {
+            SimLink l = connected.get(0);
+            Point2 acc1 = calculateKnownAccPart(node, l);
+            Point2 dir1 = node.position.subtract(l.other(node).position).perpendicularLeft();
+            
+            Point2 lineP1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
+            Point2 lineP2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
+            Point2 vGuide = lineP2.subtract(lineP1);
+            
+            Point2 res = Point2.intersect(acc1, dir1, new Point2(0,0), vGuide);
+            if (res != null) {
+                node.acceleration = res;
+                node.aSolved = true;
+                return true;
+            }
+        } else if (node.type().equals("onLink")) {
+            SimLink link = findLinkById(node.config().getLink());
+            if (link != null && link.from.aSolved && link.to.aSolved) {
+                Point2 aa = link.from.acceleration;
+                Point2 ab = link.to.acceleration;
+                Point2 posAB = link.to.position.subtract(link.from.position);
+                Point2 posAP = node.position.subtract(link.from.position);
+                double lenSq = posAB.dot(posAB);
+                if (lenSq > 1e-9) {
+                    double mu = posAP.dot(posAB) / lenSq;
+                    double nu = posAP.dot(posAB.perpendicularLeft()) / lenSq;
+                    Point2 relA = ab.subtract(aa);
+                    node.acceleration = aa.add(relA.multiply(mu)).add(relA.perpendicularLeft().multiply(nu));
+                    node.aSolved = true;
+                    return true;
+                }
             }
         }
-        return connected;
+        return false;
     }
 
-    private boolean solveSlider(SimNode node, List<SimLink> connectedLinks) {
-        if (connectedLinks.isEmpty() || node.config().getLine() == null) {
-            return false;
-        }
-        SimLink link = connectedLinks.get(0);
-        SimNode center = link.from() == node ? link.to() : link.from();
-        Point2 p1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
-        Point2 p2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
-
-        if (center == null || p1 == null || p2 == null) {
-            return false;
-        }
-
-        List<Point2> intersections = circleLineIntersect(center.position(), link.length(), p1, p2);
-        if (intersections.isEmpty()) {
-            node.setPosition(node.previousPosition());
-            node.setSolved(true);
-            return true;
-        }
-
-        node.setPosition(pickClosest(intersections, node.previousPosition()));
-        node.setSolved(true);
-        return true;
+    private Point2 calculateKnownAccPart(SimNode node, SimLink link) {
+        SimNode other = link.other(node);
+        Point2 r = node.position.subtract(other.position);
+        Point2 vRel = node.velocity.subtract(other.velocity);
+        double omegaRel = (r.x() * vRel.y() - r.y() * vRel.x()) / r.dot(r);
+        // a_normal = -omega^2 * r
+        Point2 aNormal = r.multiply(-omegaRel * omegaRel);
+        return other.acceleration.add(aNormal);
     }
 
-    private boolean solveOnLink(SimNode node) {
-        String linkId = node.config().getLink();
-        if (linkId == null || linkId.isBlank()) return false;
+    // --- Helpers ---
 
-        SimLink link = findLinkById(linkId);
-        if (link == null || !link.from().solved() || !link.to().solved()) return false;
-
-        Point2 from = link.from().position();
-        Point2 to = link.to().position();
-        Point2 delta = to.subtract(from);
-
-        if (delta.length() < 1e-9) {
-            node.setPosition(from);
-        } else {
-            Point2 axis = delta.normalize();
-            Point2 normal = axis.perpendicularLeft();
-            double distance = node.config().getDistance() == null ? 0.0 : node.config().getDistance();
-            double orthogonal = node.config().getOrthogonal() == null ? 0.0 : node.config().getOrthogonal();
-            node.setPosition(from.add(axis.multiply(distance)).add(normal.multiply(orthogonal)));
-        }
-        node.setSolved(true);
-        return true;
+    private List<SimLink> getSolvedLinks(SimNode n) {
+        List<SimLink> res = new ArrayList<>();
+        for (SimLink l : links) if ((l.from == n && l.to.solved) || (l.to == n && l.from.solved)) res.add(l);
+        return res;
     }
 
-    private boolean solveJoint(SimNode node, List<SimLink> connectedLinks) {
-        if (connectedLinks.size() < 2) return false;
+    private List<SimLink> getVSolvedLinks(SimNode n) {
+        List<SimLink> res = new ArrayList<>();
+        for (SimLink l : links) if ((l.from == n && l.to.vSolved) || (l.to == n && l.from.vSolved)) res.add(l);
+        return res;
+    }
 
-        SimLink first = connectedLinks.get(0);
-        SimLink second = connectedLinks.get(1);
-        SimNode center1 = first.from() == node ? first.to() : first.from();
-        SimNode center2 = second.from() == node ? second.to() : second.from();
-
-        if (center1 == null || center2 == null) return false;
-
-        List<Point2> intersections = circleCircleIntersect(center1.position(), first.length(), center2.position(), second.length());
-        if (intersections.isEmpty()) {
-            node.setPosition(node.previousPosition());
-            node.setSolved(true);
-            return true;
-        }
-
-        node.setPosition(pickClosest(intersections, node.previousPosition()));
-        node.setSolved(true);
-        return true;
+    private List<SimLink> getASolvedLinks(SimNode n) {
+        List<SimLink> res = new ArrayList<>();
+        for (SimLink l : links) if ((l.from == n && l.to.aSolved) || (l.to == n && l.from.aSolved)) res.add(l);
+        return res;
     }
 
     private SimLink findLinkById(String id) {
-        for (SimLink link : links) {
-            if (link.id().equals(id)) return link;
-        }
+        for (SimLink l : links) if (l.id.equals(id)) return l;
         return null;
     }
 
-    private double computeAngleOffset(SimNode from, SimNode to) {
-        Point2 delta = to.position().subtract(from.position());
-        if (delta.length() < 1e-9) return 0.0;
-        return Math.atan2(delta.y(), delta.x());
+    public Map<String, Point2> getPositions() {
+        Map<String, Point2> res = new LinkedHashMap<>();
+        for (SimNode n : nodesById.values()) res.put(n.id(), n.position);
+        return res;
     }
 
-    private Point2 pickClosest(List<Point2> points, Point2 reference) {
-        Point2 best = points.get(0);
-        double minDistance = distSq(best, reference);
-        for (int i = 1; i < points.size(); i++) {
-            Point2 point = points.get(i);
-            double distance = distSq(point, reference);
-            if (distance < minDistance) {
-                minDistance = distance;
-                best = point;
-            }
-        }
+    public Map<String, Point2> getVelocities() {
+        Map<String, Point2> res = new LinkedHashMap<>();
+        for (SimNode n : nodesById.values()) res.put(n.id(), n.velocity);
+        return res;
+    }
+
+    public Map<String, Point2> getAccelerations() {
+        Map<String, Point2> res = new LinkedHashMap<>();
+        for (SimNode n : nodesById.values()) res.put(n.id(), n.acceleration);
+        return res;
+    }
+
+    private double computeInitialAngle(SimNode from, SimNode to) {
+        Point2 d = to.position.subtract(from.position);
+        return Math.atan2(d.y(), d.x());
+    }
+
+    private List<Point2> circleCircleIntersect(Point2 c1, double r1, Point2 c2, double r2) {
+        double d2 = distSq(c1, c2);
+        double d = Math.sqrt(d2);
+        if (d > r1 + r2 || d < Math.abs(r1 - r2) || d < 1e-9) return List.of();
+        double a = (r1 * r1 - r2 * r2 + d2) / (2 * d);
+        double h = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+        Point2 p2 = c1.add(c2.subtract(c1).multiply(a / d));
+        return List.of(
+            new Point2(p2.x() + h * (c2.y() - c1.y()) / d, p2.y() - h * (c2.x() - c1.x()) / d),
+            new Point2(p2.x() - h * (c2.y() - c1.y()) / d, p2.y() + h * (c2.x() - c1.x()) / d)
+        );
+    }
+
+    private List<Point2> circleLineIntersect(Point2 c, double r, Point2 p1, Point2 p2) {
+        Point2 d = p2.subtract(p1);
+        Point2 f = p1.subtract(c);
+        double a = d.dot(d);
+        double b = 2 * f.dot(d);
+        double cc = f.dot(f) - r * r;
+        double disc = b * b - 4 * a * cc;
+        if (disc < 0) return List.of();
+        disc = Math.sqrt(disc);
+        return List.of(p1.add(d.multiply((-b + disc) / (2 * a))), p1.add(d.multiply((-b - disc) / (2 * a))));
+    }
+
+    private Point2 pickClosest(List<Point2> pts, Point2 ref) {
+        Point2 best = pts.get(0);
+        double minD = distSq(best, ref);
+        for (Point2 p : pts) { double d = distSq(p, ref); if (d < minD) { minD = d; best = p; } }
         return best;
     }
 
     private double distSq(Point2 a, Point2 b) {
-        double dx = b.x() - a.x();
-        double dy = b.y() - a.y();
+        double dx = a.x() - b.x(), dy = a.y() - b.y();
         return dx * dx + dy * dy;
     }
 
-    private List<Point2> circleCircleIntersect(Point2 c1, double r1, Point2 c2, double r2) {
-        double dSq = distSq(c1, c2);
-        double d = Math.sqrt(dSq);
-        if (d > r1 + r2 || d < Math.abs(r1 - r2) || d < 1e-9) return List.of();
-
-        double a = (r1 * r1 - r2 * r2 + dSq) / (2 * d);
-        double hSq = r1 * r1 - a * a;
-        if (hSq < -1e-9) return List.of();
-        double h = Math.sqrt(Math.max(0, hSq));
-
-        double p2x = c1.x() + a * (c2.x() - c1.x()) / d;
-        double p2y = c1.y() + a * (c2.y() - c1.y()) / d;
-
-        List<Point2> points = new ArrayList<>();
-        points.add(new Point2(p2x + h * (c2.y() - c1.y()) / d, p2y - h * (c2.x() - c1.x()) / d));
-        if (h > 1e-4) {
-            points.add(new Point2(p2x - h * (c2.y() - c1.y()) / d, p2y + h * (c2.x() - c1.x()) / d));
-        }
-        return points;
+    private static class SimNode {
+        final NodeConfig config;
+        Point2 position, velocity, acceleration;
+        boolean solved, vSolved, aSolved;
+        SimNode(NodeConfig c, Point2 p, boolean s) { config = c; position = p; solved = s; }
+        String id() { return config.getId(); }
+        String type() { return config.getType(); }
+        NodeConfig config() { return config; }
     }
 
-    private List<Point2> circleLineIntersect(Point2 center, double radius, Point2 p1, Point2 p2) {
-        double x1 = p1.x() - center.x();
-        double y1 = p1.y() - center.y();
-        double x2 = p2.x() - center.x();
-        double y2 = p2.y() - center.y();
-        double dx = x2 - x1;
-        double dy = y2 - y1;
-        double drSq = dx * dx + dy * dy;
-        if (drSq < 1e-9) return List.of();
-
-        double determinant = x1 * y2 - x2 * y1;
-        double delta = radius * radius * drSq - determinant * determinant;
-        if (delta < -1e-9) return List.of();
-
-        double sqrtDelta = Math.sqrt(Math.max(0, delta));
-        double sign = dy < 0 ? -1 : 1;
-
-        List<Point2> points = new ArrayList<>();
-        points.add(new Point2(
-                center.x() + (determinant * dy + sign * dx * sqrtDelta) / drSq,
-                center.y() + (-determinant * dx + Math.abs(dy) * sqrtDelta) / drSq
-        ));
-        if (sqrtDelta > 1e-4) {
-            points.add(new Point2(
-                    center.x() + (determinant * dy - sign * dx * sqrtDelta) / drSq,
-                    center.y() + (-determinant * dx - Math.abs(dy) * sqrtDelta) / drSq
-            ));
-        }
-        return points;
-    }
-
-    private static final class SimNode {
-        private final NodeConfig config;
-        private Point2 position;
-        private Point2 previousPosition;
-        private boolean solved;
-
-        private SimNode(NodeConfig config, Point2 position, Point2 previousPosition, boolean solved) {
-            this.config = config;
-            this.position = position;
-            this.previousPosition = previousPosition;
-            this.solved = solved;
-        }
-
-        private String id() { return config.getId(); }
-        private String type() { return config.getType(); }
-        private NodeConfig config() { return config; }
-        private Point2 position() { return position; }
-        private void setPosition(Point2 position) { this.position = position; }
-        private Point2 previousPosition() { return previousPosition; }
-        private void setPreviousPosition(Point2 previousPosition) { this.previousPosition = previousPosition; }
-        private boolean solved() { return solved; }
-        private void setSolved(boolean solved) { this.solved = solved; }
-    }
-
-    private record SimLink(String id, LinkConfig config, SimNode from, SimNode to, double angleOffset) {
-        private String type() { return config.getType(); }
-        private double length() { return config.getLength(); }
+    private static class SimLink {
+        final String id; final LinkConfig config; final SimNode from, to; final double angleOffset;
+        SimLink(String i, LinkConfig c, SimNode f, SimNode t, double a) { id = i; config = c; from = f; to = t; angleOffset = a; }
+        String type() { return config.getType(); }
+        double length() { return config.getLength(); }
+        SimNode other(SimNode n) { return n == from ? to : from; }
     }
 }

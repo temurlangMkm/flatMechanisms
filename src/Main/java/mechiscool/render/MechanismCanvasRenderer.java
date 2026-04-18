@@ -42,7 +42,7 @@ public class MechanismCanvasRenderer {
             viewport.offsetY += deltaY;
             lastMouseX = event.getX();
             lastMouseY = event.getY();
-            render(canvas, config, positions);
+            render(canvas, config, positions, Map.of(), Map.of());
         });
 
         canvas.addEventHandler(ScrollEvent.SCROLL, event -> {
@@ -54,17 +54,79 @@ public class MechanismCanvasRenderer {
             viewport.offsetX = event.getX() - mouseWorldBefore.x() * viewport.scale;
             viewport.offsetY = event.getY() - mouseWorldBefore.y() * viewport.scale;
 
-            render(canvas, config, positions);
+            render(canvas, config, positions, Map.of(), Map.of());
         });
     }
 
-    public void render(Canvas canvas, MechanismConfig config, Map<String, Point2> positions) {
+    public void render(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations) {
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         drawBackground(graphics, canvas);
         drawSliderGuides(graphics, config, viewport);
         drawLinks(graphics, config, positions, viewport);
         drawNodes(graphics, config, positions, viewport);
         drawLegend(graphics, config);
+    }
+
+    public void renderDiagram(Canvas canvas, MechanismConfig config, Map<String, Point2> vectors, Color color, String title, String unit) {
+        GraphicsContext graphics = canvas.getGraphicsContext2D();
+        graphics.setFill(COLOR_BG);
+        graphics.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        double centerX = canvas.getWidth() / 2;
+        double centerY = canvas.getHeight() / 2;
+        Point2 pole = new Point2(centerX, centerY);
+
+        graphics.setStroke(COLOR_GUIDE);
+        graphics.setLineWidth(0.5);
+        graphics.strokeLine(0, centerY, canvas.getWidth(), centerY);
+        graphics.strokeLine(centerX, 0, centerX, canvas.getHeight());
+        graphics.setFill(COLOR_TEXT);
+        graphics.fillText("P", centerX + 5, centerY - 5);
+
+        double maxLen = 0;
+        for (Point2 v : vectors.values()) {
+            maxLen = Math.max(maxLen, v.length());
+        }
+        
+        // Scale for the diagram window
+        double scaleFactor = (maxLen > 0) ? (Math.min(canvas.getWidth(), canvas.getHeight()) * 0.35) / maxLen : 1.0;
+
+        // Similarity lines
+        graphics.setStroke(Color.GRAY);
+        graphics.setLineWidth(1);
+        graphics.setLineDashes(4, 2);
+        for (LinkConfig link : config.getLinks()) {
+            Point2 vFrom = vectors.get(link.getFrom());
+            Point2 vTo = vectors.get(link.getTo());
+            if (vFrom != null && vTo != null) {
+                Point2 p1 = pole.add(vFrom.multiply(scaleFactor));
+                Point2 p2 = pole.add(vTo.multiply(scaleFactor));
+                graphics.strokeLine(p1.x(), p1.y(), p2.x(), p2.y());
+            }
+        }
+        graphics.setLineDashes();
+
+        // Absolute vectors
+        graphics.setStroke(color);
+        graphics.setLineWidth(2);
+        for (Map.Entry<String, Point2> entry : vectors.entrySet()) {
+            Point2 v = entry.getValue();
+            String nodeId = entry.getKey();
+            if (v.length() < 1e-6) continue;
+
+            Point2 end = pole.add(v.multiply(scaleFactor));
+            drawArrow(graphics, pole, end);
+            
+            graphics.setFill(COLOR_TEXT);
+            graphics.fillText(nodeId.toLowerCase(), end.x() + 5, end.y() + 5);
+            
+            // Show metric values
+            String valStr = String.format("%.2f %s", v.length(), unit);
+            graphics.fillText(valStr, end.x() + 5, end.y() + 18);
+        }
+
+        graphics.setFill(COLOR_TEXT);
+        graphics.fillText(title, 10, 20);
     }
 
     private void drawBackground(GraphicsContext graphics, Canvas canvas) {
@@ -154,6 +216,18 @@ public class MechanismCanvasRenderer {
                 graphics.strokeOval(x - NODE_RADIUS, y - NODE_RADIUS, NODE_RADIUS * 2, NODE_RADIUS * 2);
             }
         }
+    }
+
+    private void drawArrow(GraphicsContext gc, Point2 from, Point2 to) {
+        gc.strokeLine(from.x(), from.y(), to.x(), to.y());
+        Point2 dir = to.subtract(from);
+        if (dir.length() < 1) return;
+        dir = dir.normalize().multiply(6);
+        Point2 left = dir.perpendicularLeft().multiply(0.5);
+        Point2 p1 = to.subtract(dir).add(left);
+        Point2 p2 = to.subtract(dir).subtract(left);
+        gc.strokeLine(to.x(), to.y(), p1.x(), p1.y());
+        gc.strokeLine(to.x(), to.y(), p2.x(), p2.y());
     }
 
     private void drawLegend(GraphicsContext graphics, MechanismConfig config) {
