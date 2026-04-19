@@ -183,10 +183,10 @@ public class Controller {
         if (simulation == null || currentConfig == null) return;
 
         if (velocityStage != null && velocityStage.isShowing()) {
-            canvasRenderer.renderDiagram(velocityCanvas, currentConfig, simulation.getVelocities(), Color.BLUE, "Velocity Plan", "m/s");
+            canvasRenderer.renderDiagram(velocityCanvas, currentConfig, simulation.getVelocities(), Color.BLUE, "Velocity Plan", "m/s", simulation.getMaxVelocity());
         }
         if (accelerationStage != null && accelerationStage.isShowing()) {
-            canvasRenderer.renderDiagram(accelerationCanvas, currentConfig, simulation.getAccelerations(), Color.RED, "Acceleration Plan", "m/s²");
+            canvasRenderer.renderDiagram(accelerationCanvas, currentConfig, simulation.getAccelerations(), Color.RED, "Acceleration Plan", "m/s²", simulation.getMaxAcceleration());
         }
     }
 

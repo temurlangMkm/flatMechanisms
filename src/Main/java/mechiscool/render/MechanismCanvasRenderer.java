@@ -17,7 +17,7 @@ public class MechanismCanvasRenderer {
     private double lastMouseX;
     private double lastMouseY;
 
-    private static final Color COLOR_BG = Color.rgb(247, 247, 244);
+    private static final Color COLOR_BG = Color.rgb(230, 230, 230);
     private static final Color COLOR_GUIDE = Color.rgb(150, 150, 150);
     private static final Color COLOR_CRANK = Color.rgb(193, 68, 52);
     private static final Color COLOR_ROCKER = Color.rgb(56, 98, 159);
@@ -67,7 +67,7 @@ public class MechanismCanvasRenderer {
         drawLegend(graphics, config);
     }
 
-    public void renderDiagram(Canvas canvas, MechanismConfig config, Map<String, Point2> vectors, Color color, String title, String unit) {
+    public void renderDiagram(Canvas canvas, MechanismConfig config, Map<String, Point2> vectors, Color color, String title, String unit, double maxVal) {
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         graphics.setFill(COLOR_BG);
         graphics.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -83,13 +83,16 @@ public class MechanismCanvasRenderer {
         graphics.setFill(COLOR_TEXT);
         graphics.fillText("P", centerX + 5, centerY - 5);
 
-        double maxLen = 0;
+        double currentMax = 0;
         for (Point2 v : vectors.values()) {
-            maxLen = Math.max(maxLen, v.length());
+            currentMax = Math.max(currentMax, v.length());
         }
+
+        // Use global max if provided, otherwise fallback to current frame max
+        double refMax = (maxVal > 0) ? maxVal : currentMax;
         
         // Scale for the diagram window
-        double scaleFactor = (maxLen > 0) ? (Math.min(canvas.getWidth(), canvas.getHeight()) * 0.35) / maxLen : 1.0;
+        double scaleFactor = (refMax > 0) ? (Math.min(canvas.getWidth(), canvas.getHeight()) * 0.35) / refMax : 1.0;
 
         // Similarity lines
         graphics.setStroke(Color.GRAY);

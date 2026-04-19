@@ -17,6 +17,8 @@ public class MechanismSimulation {
     private final List<SimLink> rods = new ArrayList<>();
     
     private double phase;
+    private double maxVelocityFound;
+    private double maxAccelerationFound;
 
     public MechanismSimulation(MechanismConfig config) {
         this.config = config;
@@ -47,6 +49,8 @@ public class MechanismSimulation {
 
     public void reset() {
         phase = 0;
+        maxVelocityFound = 0;
+        maxAccelerationFound = 0;
         for (SimNode node : nodesById.values()) {
             Point2 seed = MechanismLayoutSolver.seedPoint(node.config());
             node.position = (seed != null) ? seed : new Point2(0, 0);
@@ -54,7 +58,26 @@ public class MechanismSimulation {
             node.acceleration = new Point2(0, 0);
             node.solved = "support".equals(node.type());
         }
+        precalculateMaxValues();
         solveState(0);
+    }
+
+    private void precalculateMaxValues() {
+        double originalPhase = phase;
+        double omega = config.getCrankSpeed();
+        int steps = 100;
+        for (int i = 0; i < steps; i++) {
+            phase = (TWO_PI * i) / steps;
+            solvePositions();
+            solveVelocities(omega);
+            solveAccelerations(omega);
+            
+            for (SimNode node : nodesById.values()) {
+                maxVelocityFound = Math.max(maxVelocityFound, node.velocity.length());
+                maxAccelerationFound = Math.max(maxAccelerationFound, node.acceleration.length());
+            }
+        }
+        phase = originalPhase;
     }
 
     public void step(double dt) {
@@ -340,6 +363,14 @@ public class MechanismSimulation {
         Map<String, Point2> res = new LinkedHashMap<>();
         for (SimNode n : nodesById.values()) res.put(n.id(), n.acceleration);
         return res;
+    }
+
+    public double getMaxVelocity() {
+        return maxVelocityFound;
+    }
+
+    public double getMaxAcceleration() {
+        return maxAccelerationFound;
     }
 
     private double computeInitialAngle(SimNode from, SimNode to) {
