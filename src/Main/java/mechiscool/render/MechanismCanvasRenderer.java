@@ -36,6 +36,7 @@ public class MechanismCanvasRenderer {
     private static final Color COLOR_SUPPORT_STROKE = Color.rgb(20, 84, 57);
     private static final Color COLOR_SLIDER = Color.rgb(214, 145, 49);
     private static final Color COLOR_ON_LINK = Color.rgb(131, 66, 148);
+    private static final Color COLOR_MIRRORED = Color.rgb(23, 128, 139);
     private static final Color COLOR_NODE_DEFAULT_STROKE = Color.rgb(33, 33, 33);
 
     public void initializeControls(Canvas canvas, Runnable renderCallback) {
@@ -77,7 +78,7 @@ public class MechanismCanvasRenderer {
     }
 
     public void renderVelocityPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, double maxVelocity, double zoom) {
-        if (isFourBarABCD(config, positions) && hasVectors(velocities, "C", "D")) {
+        if (isPlainFourBarABCD(config, positions) && hasVectors(velocities, "C", "D")) {
             renderFourBarVelocityPlan(canvas, positions, velocities, zoom);
             return;
         }
@@ -130,7 +131,7 @@ public class MechanismCanvasRenderer {
     }
 
     public void renderAccelerationPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations, double maxAcceleration, double zoom) {
-        if (isFourBarABCD(config, positions) && hasVectors(velocities, "C", "D") && hasVectors(accelerations, "C", "D")) {
+        if (isPlainFourBarABCD(config, positions) && hasVectors(velocities, "C", "D") && hasVectors(accelerations, "C", "D")) {
             renderFourBarAccelerationPlan(canvas, positions, velocities, accelerations, zoom);
             return;
         }
@@ -264,6 +265,20 @@ public class MechanismCanvasRenderer {
                 graphics.setFill(COLOR_ON_LINK);
                 graphics.fillOval(x - 4, y - 4, 8, 8);
             }
+            case "mirrored" -> {
+                graphics.setFill(COLOR_MIRRORED);
+                graphics.fillPolygon(
+                        new double[]{x, x + 6, x, x - 6},
+                        new double[]{y - 7, y, y + 7, y},
+                        4
+                );
+                graphics.setStroke(Color.rgb(13, 83, 91));
+                graphics.strokePolygon(
+                        new double[]{x, x + 6, x, x - 6},
+                        new double[]{y - 7, y, y + 7, y},
+                        4
+                );
+            }
             default -> {
                 graphics.setFill(Color.WHITE);
                 graphics.fillOval(x - NODE_RADIUS, y - NODE_RADIUS, NODE_RADIUS * 2, NODE_RADIUS * 2);
@@ -366,6 +381,10 @@ public class MechanismCanvasRenderer {
                 && hasLink(config, "A", "C")
                 && hasLink(config, "C", "D")
                 && hasLink(config, "B", "D");
+    }
+
+    private boolean isPlainFourBarABCD(MechanismConfig config, Map<String, Point2> positions) {
+        return config.getNodes().size() == 4 && isFourBarABCD(config, positions);
     }
 
     private boolean hasLink(MechanismConfig config, String first, String second) {

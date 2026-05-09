@@ -68,6 +68,15 @@ public class MechanismConfigLoader {
                 if (!linkIds.contains(node.getLink())) {
                     throw new IllegalArgumentException("Node '" + node.getId() + "' references unknown link '" + node.getLink() + "'.");
                 }
+            } else if ("mirrored".equals(node.getType())) {
+                requireText(node.getSource(), "Mirrored node '" + node.getId() + "' must define 'source'.");
+                requireText(node.getPivot(), "Mirrored node '" + node.getId() + "' must define 'pivot'.");
+                if (!nodeIds.contains(node.getSource())) {
+                    throw new IllegalArgumentException("Mirrored node '" + node.getId() + "' references unknown source '" + node.getSource() + "'.");
+                }
+                if (!nodeIds.contains(node.getPivot())) {
+                    throw new IllegalArgumentException("Mirrored node '" + node.getId() + "' references unknown pivot '" + node.getPivot() + "'.");
+                }
             }
         }
     }
@@ -96,6 +105,11 @@ public class MechanismConfigLoader {
                 if (node.getOrthogonal() == null) {
                     node.setOrthogonal(0.0);
                 }
+            }
+            case "mirrored" -> {
+                requireText(node.getSource(), "Mirrored node '" + node.getId() + "' must define 'source'.");
+                requireText(node.getPivot(), "Mirrored node '" + node.getId() + "' must define 'pivot'.");
+                requirePositive(node.getDistance(), "Mirrored node '" + node.getId() + "' must define positive 'distance'.");
             }
             default -> throw new IllegalArgumentException("Unsupported node type '" + node.getType() + "' for node '" + node.getId() + "'.");
         }

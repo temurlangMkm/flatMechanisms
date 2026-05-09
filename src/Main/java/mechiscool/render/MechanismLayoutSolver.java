@@ -55,6 +55,13 @@ public final class MechanismLayoutSolver {
                         positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), node.getOrthogonal()));
                         changed = true;
                     }
+                } else if ("mirrored".equals(node.getType()) && !positions.containsKey(node.getId())) {
+                    Point2 source = positions.get(node.getSource());
+                    Point2 pivot = positions.get(node.getPivot());
+                    if (source != null && pivot != null) {
+                        positions.put(node.getId(), mirroredPoint(source, pivot, node.getDistance()));
+                        changed = true;
+                    }
                 }
             }
 
@@ -65,6 +72,7 @@ public final class MechanismLayoutSolver {
 
         fillFallbackPositions(config, positions);
         refreshOnLinkNodes(config, linksById, positions);
+        refreshMirroredNodes(config, positions);
         return positions;
     }
 
@@ -75,6 +83,18 @@ public final class MechanismLayoutSolver {
                     LinkConfig baseLink = linksById.get(node.getLink());
                     if (baseLink != null && positions.containsKey(baseLink.getFrom()) && positions.containsKey(baseLink.getTo())) {
                         positions.put(node.getId(), pointOnLink(positions.get(baseLink.getFrom()), positions.get(baseLink.getTo()), node.getDistance(), node.getOrthogonal()));
+                    }
+                });
+    }
+
+    public static void refreshMirroredNodes(MechanismConfig config, Map<String, Point2> positions) {
+        config.getNodes().stream()
+                .filter(node -> "mirrored".equals(node.getType()))
+                .forEach(node -> {
+                    Point2 source = positions.get(node.getSource());
+                    Point2 pivot = positions.get(node.getPivot());
+                    if (source != null && pivot != null) {
+                        positions.put(node.getId(), mirroredPoint(source, pivot, node.getDistance()));
                     }
                 });
     }
@@ -116,6 +136,12 @@ public final class MechanismLayoutSolver {
         Point2 axis = to.subtract(from).normalize();
         Point2 normal = axis.perpendicularLeft();
         return from.add(axis.multiply(distVal)).add(normal.multiply(orthVal));
+    }
+
+    public static Point2 mirroredPoint(Point2 source, Point2 pivot, Double distance) {
+        double distVal = distance != null ? distance : 0.0;
+        Point2 axis = pivot.subtract(source).normalize();
+        return pivot.add(axis.multiply(distVal));
     }
 
     private static void fillFallbackPositions(MechanismConfig config, Map<String, Point2> positions) {

@@ -10,6 +10,8 @@ public class NodeConfig {
     private Double y;
     private SliderLineConfig line;
     private String link;
+    private String source;
+    private String pivot;
     private Double distance;
     private Double orthogonal;
     private Integer assembly;
@@ -60,6 +62,22 @@ public class NodeConfig {
 
     public void setLink(String link) {
         this.link = link;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public String getPivot() {
+        return pivot;
+    }
+
+    public void setPivot(String pivot) {
+        this.pivot = pivot;
     }
 
     public Double getDistance() {

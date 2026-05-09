@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.example</groupId>
-    <artifactId>MechIsCool</artifactId>
-    <version>3.14.1</version>
-    <name>MechIsCool</name>
+    <artifactId>MechLab</artifactId>
+    <version>3.14.2</version>
+    <name>MechLab</name>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

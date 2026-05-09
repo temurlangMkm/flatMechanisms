@@ -158,12 +158,43 @@ public class MechanismSimulation {
         } else if (node.type().equals("onLink")) {
             SimLink link = findLinkById(node.config().getLink());
             if (link != null && link.from.solved && link.to.solved) {
-                Point2 dir = link.to.position.subtract(link.from.position).normalize();
-                Point2 norm = dir.perpendicularLeft();
-                double d = node.config().getDistance() != null ? node.config().getDistance() : 0;
-                double o = node.config().getOrthogonal() != null ? node.config().getOrthogonal() : 0;
-                node.position = link.from.position.add(dir.multiply(d)).add(norm.multiply(o));
+                node.position = MechanismLayoutSolver.pointOnLink(
+                        link.from.position,
+                        link.to.position,
+                        node.config().getDistance(),
+                        node.config().getOrthogonal()
+                );
                 node.solved = true;
+                return true;
+            }
+        } else if (node.type().equals("mirrored")) {
+            SimNode source = nodesById.get(node.config().getSource());
+            SimNode pivot = nodesById.get(node.config().getPivot());
+            if (source != null && pivot != null && source.solved && pivot.solved) {
+                Point2 axis = pivot.position.subtract(source.position);
+                if (axis.length() > 1e-9) {
+                    node.position = MechanismLayoutSolver.mirroredPoint(source.position, pivot.position, node.config().getDistance());
+                    node.solved = true;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean solveMirroredVelocity(SimNode node) {
+        SimNode source = nodesById.get(node.config().getSource());
+        SimNode pivot = nodesById.get(node.config().getPivot());
+        if (source != null && pivot != null && source.vSolved && pivot.vSolved) {
+            Point2 r = pivot.position.subtract(source.position);
+            double lenSq = r.dot(r);
+            if (lenSq > 1e-9) {
+                double omega = cross(r, pivot.velocity.subtract(source.velocity)) / lenSq;
+                double length = Math.sqrt(lenSq);
+                double distance = node.config().getDistance() != null ? node.config().getDistance() : 0;
+                Point2 axis = r.divide(length);
+                node.velocity = pivot.velocity.add(axis.perpendicularLeft().multiply(distance * omega));
+                node.vSolved = true;
                 return true;
             }
         }
@@ -211,36 +242,33 @@ public class MechanismSimulation {
             }
         } else if (node.type().equals("slider") && !connected.isEmpty()) {
             SimLink l = connected.get(0);
-            Point2 p1 = l.other(node).velocity;
-            Point2 v1 = node.position.subtract(l.other(node).position).perpendicularLeft();
-            // Slider velocity must be along its guide line
+            SimNode other = l.other(node);
             Point2 lineP1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
             Point2 lineP2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
-            Point2 vGuide = lineP2.subtract(lineP1);
-            Point2 res = Point2.intersect(p1, v1, new Point2(0,0), vGuide);
-            if (res != null) {
-                node.velocity = res;
+            Point2 guide = lineP2.subtract(lineP1).normalize();
+            Point2 r = node.position.subtract(other.position);
+            double denominator = guide.dot(r);
+            if (Math.abs(denominator) > 1e-9) {
+                double speed = other.velocity.dot(r) / denominator;
+                node.velocity = guide.multiply(speed);
                 node.vSolved = true;
                 return true;
             }
         } else if (node.type().equals("onLink")) {
             SimLink link = findLinkById(node.config().getLink());
             if (link != null && link.from.vSolved && link.to.vSolved) {
-                // Theorem of similarity: v_p = v_a + (v_b - v_a) * (AP/AB) + ...
-                Point2 va = link.from.velocity;
-                Point2 vb = link.to.velocity;
-                Point2 ab = link.to.position.subtract(link.from.position);
-                Point2 ap = node.position.subtract(link.from.position);
-                double lenSq = ab.dot(ab);
+                Point2 r = link.to.position.subtract(link.from.position);
+                double lenSq = r.dot(r);
                 if (lenSq > 1e-9) {
-                    double mu = ap.dot(ab) / lenSq;
-                    double nu = ap.dot(ab.perpendicularLeft()) / lenSq;
-                    Point2 relV = vb.subtract(va);
-                    node.velocity = va.add(relV.multiply(mu)).add(relV.perpendicularLeft().multiply(nu));
+                    double omega = cross(r, link.to.velocity.subtract(link.from.velocity)) / lenSq;
+                    Point2 pointOffset = node.position.subtract(link.from.position);
+                    node.velocity = link.from.velocity.add(pointOffset.perpendicularLeft().multiply(omega));
                     node.vSolved = true;
                     return true;
                 }
             }
+        } else if (node.type().equals("mirrored")) {
+            return solveMirroredVelocity(node);
         }
         return false;
     }
@@ -290,32 +318,54 @@ public class MechanismSimulation {
             }
         } else if (node.type().equals("slider") && !connected.isEmpty()) {
             SimLink l = connected.get(0);
-            Point2 acc1 = calculateKnownAccPart(node, l);
-            Point2 dir1 = node.position.subtract(l.other(node).position).perpendicularLeft();
-            
+            SimNode other = l.other(node);
             Point2 lineP1 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP1());
             Point2 lineP2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
-            Point2 vGuide = lineP2.subtract(lineP1);
-            
-            Point2 res = Point2.intersect(acc1, dir1, new Point2(0,0), vGuide);
-            if (res != null) {
-                node.acceleration = res;
+            Point2 guide = lineP2.subtract(lineP1).normalize();
+            Point2 r = node.position.subtract(other.position);
+            double denominator = guide.dot(r);
+            if (Math.abs(denominator) > 1e-9) {
+                Point2 relativeVelocity = node.velocity.subtract(other.velocity);
+                double acceleration = (other.acceleration.dot(r) - relativeVelocity.dot(relativeVelocity)) / denominator;
+                node.acceleration = guide.multiply(acceleration);
                 node.aSolved = true;
                 return true;
             }
         } else if (node.type().equals("onLink")) {
             SimLink link = findLinkById(node.config().getLink());
             if (link != null && link.from.aSolved && link.to.aSolved) {
-                Point2 aa = link.from.acceleration;
-                Point2 ab = link.to.acceleration;
                 Point2 posAB = link.to.position.subtract(link.from.position);
-                Point2 posAP = node.position.subtract(link.from.position);
                 double lenSq = posAB.dot(posAB);
                 if (lenSq > 1e-9) {
-                    double mu = posAP.dot(posAB) / lenSq;
-                    double nu = posAP.dot(posAB.perpendicularLeft()) / lenSq;
-                    Point2 relA = ab.subtract(aa);
-                    node.acceleration = aa.add(relA.multiply(mu)).add(relA.perpendicularLeft().multiply(nu));
+                    double omega = cross(posAB, link.to.velocity.subtract(link.from.velocity)) / lenSq;
+                    Point2 normalAB = posAB.multiply(-omega * omega);
+                    double alpha = cross(posAB, link.to.acceleration.subtract(link.from.acceleration).subtract(normalAB)) / lenSq;
+                    Point2 pointOffset = node.position.subtract(link.from.position);
+                    Point2 normalPoint = pointOffset.multiply(-omega * omega);
+                    Point2 tangentPoint = pointOffset.perpendicularLeft().multiply(alpha);
+                    node.acceleration = link.from.acceleration.add(normalPoint).add(tangentPoint);
+                    node.aSolved = true;
+                    return true;
+                }
+            }
+        } else if (node.type().equals("mirrored")) {
+            SimNode source = nodesById.get(node.config().getSource());
+            SimNode pivot = nodesById.get(node.config().getPivot());
+            if (source != null && pivot != null && source.aSolved && pivot.aSolved) {
+                Point2 r = pivot.position.subtract(source.position);
+                double lenSq = r.dot(r);
+                if (lenSq > 1e-9) {
+                    Point2 rVelocity = pivot.velocity.subtract(source.velocity);
+                    double omega = cross(r, rVelocity) / lenSq;
+                    Point2 rAcceleration = pivot.acceleration.subtract(source.acceleration);
+                    double alpha = cross(r, rAcceleration) / lenSq
+                            - 2 * cross(r, rVelocity) * r.dot(rVelocity) / (lenSq * lenSq);
+                    double length = Math.sqrt(lenSq);
+                    double distance = node.config().getDistance() != null ? node.config().getDistance() : 0;
+                    Point2 axis = r.divide(length);
+                    Point2 pointNormal = axis.multiply(-distance * omega * omega);
+                    Point2 pointTangent = axis.perpendicularLeft().multiply(distance * alpha);
+                    node.acceleration = pivot.acceleration.add(pointNormal).add(pointTangent);
                     node.aSolved = true;
                     return true;
                 }
@@ -439,6 +489,10 @@ public class MechanismSimulation {
     private double distSq(Point2 a, Point2 b) {
         double dx = a.x() - b.x(), dy = a.y() - b.y();
         return dx * dx + dy * dy;
+    }
+
+    private double cross(Point2 a, Point2 b) {
+        return a.x() * b.y() - a.y() * b.x();
     }
 
     private static class SimNode {
