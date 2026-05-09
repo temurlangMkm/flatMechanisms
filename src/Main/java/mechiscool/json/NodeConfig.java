@@ -12,6 +12,7 @@ public class NodeConfig {
     private String link;
     private Double distance;
     private Double orthogonal;
+    private Integer assembly;
 
     public String getId() {
         return id;
@@ -75,5 +76,13 @@ public class NodeConfig {
 
     public void setOrthogonal(Double orthogonal) {
         this.orthogonal = orthogonal;
+    }
+
+    public Integer getAssembly() {
+        return assembly;
+    }
+
+    public void setAssembly(Integer assembly) {
+        this.assembly = assembly;
     }
 }

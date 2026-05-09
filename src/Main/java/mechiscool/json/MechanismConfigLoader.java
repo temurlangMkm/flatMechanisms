@@ -73,6 +73,10 @@ public class MechanismConfigLoader {
     }
 
     private void validateNode(NodeConfig node) {
+        if (node.getAssembly() != null && node.getAssembly() != 1 && node.getAssembly() != 2) {
+            throw new IllegalArgumentException("Node '" + node.getId() + "' assembly must be 1 or 2.");
+        }
+
         switch (node.getType()) {
             case "support" -> {
                 requireNumber(node.getX(), "Support node '" + node.getId() + "' must define 'x'.");

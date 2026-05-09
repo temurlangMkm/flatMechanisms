@@ -38,7 +38,7 @@ public class MechanismCanvasRenderer {
     private static final Color COLOR_ON_LINK = Color.rgb(131, 66, 148);
     private static final Color COLOR_NODE_DEFAULT_STROKE = Color.rgb(33, 33, 33);
 
-    public void initializeControls(Canvas canvas, MechanismConfig config, Map<String, Point2> positions) {
+    public void initializeControls(Canvas canvas, Runnable renderCallback) {
         canvas.addEventHandler(MouseEvent.MOUSE_PRESSED, event -> {
             lastMouseX = event.getX();
             lastMouseY = event.getY();
@@ -51,7 +51,7 @@ public class MechanismCanvasRenderer {
             viewport.offsetY += deltaY;
             lastMouseX = event.getX();
             lastMouseY = event.getY();
-            render(canvas, config, positions, Map.of(), Map.of());
+            renderCallback.run();
         });
 
         canvas.addEventHandler(ScrollEvent.SCROLL, event -> {
@@ -63,7 +63,7 @@ public class MechanismCanvasRenderer {
             viewport.offsetX = event.getX() - mouseWorldBefore.x() * viewport.scale;
             viewport.offsetY = event.getY() - mouseWorldBefore.y() * viewport.scale;
 
-            render(canvas, config, positions, Map.of(), Map.of());
+            renderCallback.run();
         });
     }
 
@@ -76,15 +76,15 @@ public class MechanismCanvasRenderer {
         drawLegend(graphics, config);
     }
 
-    public void renderVelocityPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, double maxVelocity) {
+    public void renderVelocityPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, double maxVelocity, double zoom) {
         if (isFourBarABCD(config, positions) && hasVectors(velocities, "C", "D")) {
-            renderFourBarVelocityPlan(canvas, positions, velocities);
+            renderFourBarVelocityPlan(canvas, positions, velocities, zoom);
             return;
         }
 
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         Point2 pole = preparePlanCanvas(canvas, graphics, "Velocity Plan", "p");
-        double scaleFactor = planScale(canvas, velocities, maxVelocity);
+        double scaleFactor = planScale(canvas, velocities, maxVelocity, zoom);
 
         graphics.setStroke(Color.rgb(120, 120, 120));
         graphics.setLineWidth(1);
@@ -129,15 +129,15 @@ public class MechanismCanvasRenderer {
         }
     }
 
-    public void renderAccelerationPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations, double maxAcceleration) {
+    public void renderAccelerationPlan(Canvas canvas, MechanismConfig config, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations, double maxAcceleration, double zoom) {
         if (isFourBarABCD(config, positions) && hasVectors(velocities, "C", "D") && hasVectors(accelerations, "C", "D")) {
-            renderFourBarAccelerationPlan(canvas, positions, velocities, accelerations);
+            renderFourBarAccelerationPlan(canvas, positions, velocities, accelerations, zoom);
             return;
         }
 
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         Point2 pole = preparePlanCanvas(canvas, graphics, "Acceleration Plan", "π");
-        double scaleFactor = planScale(canvas, accelerations, maxAcceleration);
+        double scaleFactor = planScale(canvas, accelerations, maxAcceleration, zoom);
 
         graphics.setStroke(Color.rgb(115, 115, 115));
         graphics.setLineWidth(1);
@@ -292,13 +292,13 @@ public class MechanismCanvasRenderer {
         return pole;
     }
 
-    private void renderFourBarVelocityPlan(Canvas canvas, Map<String, Point2> positions, Map<String, Point2> velocities) {
+    private void renderFourBarVelocityPlan(Canvas canvas, Map<String, Point2> positions, Map<String, Point2> velocities, double zoom) {
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         Point2 pole = preparePlanCanvas(canvas, graphics, "Velocity Plan", "p");
 
         Point2 vc = velocities.get("C");
         Point2 vd = velocities.get("D");
-        double scale = fitPlanScale(canvas, vc, vd, 6.0);
+        double scale = fitPlanScale(canvas, vc, vd, 6.0, zoom);
         Point2 c = planEnd(pole, vc, scale);
         Point2 d = planEnd(pole, vd, scale);
 
@@ -319,7 +319,7 @@ public class MechanismCanvasRenderer {
         drawColoredMidLabel(graphics, c, d, "V_DC", COLOR_PLAN_RED, 4, -4);
     }
 
-    private void renderFourBarAccelerationPlan(Canvas canvas, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations) {
+    private void renderFourBarAccelerationPlan(Canvas canvas, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations, double zoom) {
         GraphicsContext graphics = canvas.getGraphicsContext2D();
         Point2 pole = preparePlanCanvas(canvas, graphics, "Acceleration Plan", "π");
 
@@ -327,7 +327,7 @@ public class MechanismCanvasRenderer {
         Point2 aD = accelerations.get("D");
         Point2 normalDC = normalAcceleration("C", "D", positions, velocities);
         Point2 normalDB = normalAcceleration("B", "D", positions, velocities);
-        double scale = fitPlanScale(canvas, aC, aD, aC.add(normalDC), normalDB, 3.0);
+        double scale = fitPlanScale(canvas, aC, aD, aC.add(normalDC), normalDB, 3.0, zoom);
 
         Point2 cTilde = planEnd(pole, aC, scale);
         Point2 dTilde = planEnd(pole, aD, scale);
@@ -417,18 +417,18 @@ public class MechanismCanvasRenderer {
         }
     }
 
-    private double fitPlanScale(Canvas canvas, Point2 first, Point2 second, double cap) {
-        return fitPlanScale(canvas, first, second, null, null, cap);
+    private double fitPlanScale(Canvas canvas, Point2 first, Point2 second, double cap, double zoom) {
+        return fitPlanScale(canvas, first, second, null, null, cap, zoom);
     }
 
-    private double fitPlanScale(Canvas canvas, Point2 first, Point2 second, Point2 third, Point2 fourth, double cap) {
+    private double fitPlanScale(Canvas canvas, Point2 first, Point2 second, Point2 third, Point2 fourth, double cap, double zoom) {
         double max = Math.max(vectorLength(first), vectorLength(second));
         max = Math.max(max, vectorLength(third));
         max = Math.max(max, vectorLength(fourth));
         if (max < EPS) {
             return 1.0;
         }
-        return Math.min((Math.min(canvas.getWidth(), canvas.getHeight()) * 0.35) / max, cap);
+        return Math.min((Math.min(canvas.getWidth(), canvas.getHeight()) * 0.35) / max, cap) * zoom;
     }
 
     private double vectorLength(Point2 vector) {
@@ -479,13 +479,13 @@ public class MechanismCanvasRenderer {
         graphics.fillText(label, (from.x() + to.x()) / 2 + offsetX, (from.y() + to.y()) / 2 + offsetY);
     }
 
-    private double planScale(Canvas canvas, Map<String, Point2> vectors, double maxVal) {
+    private double planScale(Canvas canvas, Map<String, Point2> vectors, double maxVal, double zoom) {
         double currentMax = 0;
         for (Point2 vector : vectors.values()) {
             currentMax = Math.max(currentMax, vector.length());
         }
         double refMax = (maxVal > 0) ? maxVal : currentMax;
-        return (refMax > 0) ? (Math.min(canvas.getWidth(), canvas.getHeight()) * 0.34) / refMax : 1.0;
+        return ((refMax > 0) ? (Math.min(canvas.getWidth(), canvas.getHeight()) * 0.34) / refMax : 1.0) * zoom;
     }
 
     private AccelerationParts accelerationParts(LinkConfig link, Map<String, Point2> positions, Map<String, Point2> velocities, Map<String, Point2> accelerations, double scaleFactor, Point2 pole) {

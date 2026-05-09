@@ -59,7 +59,7 @@ public class MechanismSimulation {
             node.solved = "support".equals(node.type());
         }
         precalculateMaxValues();
-        solveState(0);
+        solveState(0, true);
     }
 
     private void precalculateMaxValues() {
@@ -68,7 +68,7 @@ public class MechanismSimulation {
         int steps = 100;
         for (int i = 0; i < steps; i++) {
             phase = (TWO_PI * i) / steps;
-            solvePositions();
+            solvePositions(i == 0);
             solveVelocities(omega);
             solveAccelerations(omega);
             
@@ -81,15 +81,27 @@ public class MechanismSimulation {
     }
 
     public void step(double dt) {
-        solveState(dt);
+        solveState(dt, false);
     }
 
-    private void solveState(double dt) {
+    public void setPhaseDegrees(double degrees) {
+        phase = Math.toRadians(normalizeDegrees(degrees));
+        solveState(0, true);
+    }
+
+    public double getPhaseDegrees() {
+        return normalizeDegrees(Math.toDegrees(phase));
+    }
+
+    private void solveState(double dt, boolean useAssemblySelection) {
         double omega = config.getCrankSpeed();
         phase = (phase + dt * omega) % TWO_PI;
+        if (phase < 0) {
+            phase += TWO_PI;
+        }
 
         // 1. Positions (Iterative geometry solver)
-        solvePositions();
+        solvePositions(useAssemblySelection);
 
         // 2. Velocities (Analytical Vector Plan)
         solveVelocities(omega);
@@ -98,7 +110,7 @@ public class MechanismSimulation {
         solveAccelerations(omega);
     }
 
-    private void solvePositions() {
+    private void solvePositions(boolean useAssemblySelection) {
         for (SimNode node : nodesById.values()) {
             node.solved = "support".equals(node.type());
         }
@@ -113,13 +125,13 @@ public class MechanismSimulation {
             boolean progress = false;
             for (SimNode node : nodesById.values()) {
                 if (node.solved) continue;
-                if (trySolveNodePosition(node)) progress = true;
+                if (trySolveNodePosition(node, useAssemblySelection)) progress = true;
             }
             if (!progress) break;
         }
     }
 
-    private boolean trySolveNodePosition(SimNode node) {
+    private boolean trySolveNodePosition(SimNode node, boolean useAssemblySelection) {
         List<SimLink> connected = getSolvedLinks(node);
         if (node.type().equals("joint") && connected.size() >= 2) {
             SimLink l1 = connected.get(0);
@@ -128,7 +140,7 @@ public class MechanismSimulation {
             SimNode c2 = l2.other(node);
             List<Point2> pts = circleCircleIntersect(c1.position, l1.length(), c2.position, l2.length());
             if (!pts.isEmpty()) {
-                node.position = pickClosest(pts, node.position);
+                node.position = pickSolution(pts, node, useAssemblySelection);
                 node.solved = true;
                 return true;
             }
@@ -139,7 +151,7 @@ public class MechanismSimulation {
             Point2 p2 = MechanismLayoutSolver.arrayPoint(node.config().getLine().getP2());
             List<Point2> pts = circleLineIntersect(c.position, l.length(), p1, p2);
             if (!pts.isEmpty()) {
-                node.position = pickClosest(pts, node.position);
+                node.position = pickSolution(pts, node, useAssemblySelection);
                 node.solved = true;
                 return true;
             }
@@ -408,6 +420,20 @@ public class MechanismSimulation {
         double minD = distSq(best, ref);
         for (Point2 p : pts) { double d = distSq(p, ref); if (d < minD) { minD = d; best = p; } }
         return best;
+    }
+
+    private Point2 pickSolution(List<Point2> pts, SimNode node, boolean useAssemblySelection) {
+        if (useAssemblySelection && pts.size() > 1) {
+            int assembly = node.config().getAssembly() != null ? node.config().getAssembly() : 1;
+            int index = Math.max(1, Math.min(2, assembly)) - 1;
+            return pts.get(index);
+        }
+        return pickClosest(pts, node.position);
+    }
+
+    private double normalizeDegrees(double degrees) {
+        double normalized = degrees % 360.0;
+        return normalized < 0 ? normalized + 360.0 : normalized;
     }
 
     private double distSq(Point2 a, Point2 b) {

@@ -2,22 +2,21 @@ package mechiscool;
 
 import javafx.animation.AnimationTimer;
 import javafx.fxml.FXML;
-import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
-import javafx.stage.Stage;
 import javafx.stage.Window;
-import mechiscool.render.MechanismCanvasRenderer;
-import mechiscool.render.MechanismSimulation;
 import mechiscool.json.MechanismConfig;
 import mechiscool.json.MechanismConfigLoader;
-import mechiscool.render.Point2;
+import mechiscool.render.MechanismCanvasRenderer;
+import mechiscool.render.MechanismSimulation;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,6 +25,10 @@ import java.nio.file.Files;
 import java.util.Map;
 
 public class Controller {
+    private static final double PLAN_ZOOM_FACTOR = 1.15;
+    private static final double MIN_PLAN_ZOOM = 0.2;
+    private static final double MAX_PLAN_ZOOM = 8.0;
+
     private final MechanismConfigLoader configLoader = new MechanismConfigLoader();
     private final MechanismCanvasRenderer canvasRenderer = new MechanismCanvasRenderer();
     private MechanismSimulation simulation;
@@ -34,12 +37,10 @@ public class Controller {
     private AnimationTimer animationTimer;
     private long lastFrameNanos;
     private boolean running;
-    private boolean controlsInitialized = false;
-
-    private Stage velocityStage;
-    private Canvas velocityCanvas;
-    private Stage accelerationStage;
-    private Canvas accelerationCanvas;
+    private boolean controlsInitialized;
+    private boolean updatingAngleSlider;
+    private double velocityPlanZoom = 1.0;
+    private double accelerationPlanZoom = 1.0;
 
     @FXML
     private TextArea contentInput;
@@ -51,48 +52,70 @@ public class Controller {
     private Canvas myCanvas;
 
     @FXML
+    private StackPane myCanvasPane;
+
+    @FXML
     private Button restartB;
 
     @FXML
     private Button runB;
 
     @FXML
-    private Button velocityDiagramB;
+    private Slider crankAngleSlider;
 
     @FXML
-    private Button accelerationDiagramB;
+    private Label angleValueLabel;
+
+    @FXML
+    private Canvas velocityCanvas;
+
+    @FXML
+    private StackPane velocityCanvasPane;
+
+    @FXML
+    private Button velocityZoomInB;
+
+    @FXML
+    private Button velocityZoomOutB;
+
+    @FXML
+    private Canvas accelerationCanvas;
+
+    @FXML
+    private StackPane accelerationCanvasPane;
+
+    @FXML
+    private Button accelerationZoomInB;
+
+    @FXML
+    private Button accelerationZoomOutB;
 
     @FXML
     private void initialize() {
+        bindCanvasToPane(myCanvas, myCanvasPane);
+        bindCanvasToPane(velocityCanvas, velocityCanvasPane);
+        bindCanvasToPane(accelerationCanvas, accelerationCanvasPane);
+
         loadB.setOnAction(event -> loadJsonFromFile());
         runB.setOnAction(event -> toggleRunPause());
         restartB.setOnAction(event -> restartSimulation());
-        
-        velocityDiagramB.setOnAction(event -> openDiagramWindow("Velocity Plan (v)", Color.BLUE, true));
-        accelerationDiagramB.setOnAction(event -> openDiagramWindow("Acceleration Plan (a)", Color.RED, false));
+        velocityZoomInB.setOnAction(event -> zoomVelocityPlan(PLAN_ZOOM_FACTOR));
+        velocityZoomOutB.setOnAction(event -> zoomVelocityPlan(1.0 / PLAN_ZOOM_FACTOR));
+        accelerationZoomInB.setOnAction(event -> zoomAccelerationPlan(PLAN_ZOOM_FACTOR));
+        accelerationZoomOutB.setOnAction(event -> zoomAccelerationPlan(1.0 / PLAN_ZOOM_FACTOR));
+        crankAngleSlider.valueProperty().addListener((observable, oldValue, newValue) -> handleAngleSliderChanged(newValue.doubleValue()));
 
         drawPlaceholder();
         createAnimationTimer();
         runB.setText("Run");
+        updateAngleSlider(0);
     }
 
-    private void openDiagramWindow(String title, Color color, boolean isVelocity) {
-        Stage stage = new Stage();
-        stage.setTitle(title);
-        Canvas canvas = new Canvas(500, 500);
-        StackPane root = new StackPane(canvas);
-        stage.setScene(new Scene(root));
-        stage.show();
-
-        if (isVelocity) {
-            velocityStage = stage;
-            velocityCanvas = canvas;
-        } else {
-            accelerationStage = stage;
-            accelerationCanvas = canvas;
-        }
-        
-        updateDiagrams();
+    private void bindCanvasToPane(Canvas canvas, StackPane pane) {
+        canvas.widthProperty().bind(pane.widthProperty());
+        canvas.heightProperty().bind(pane.heightProperty());
+        canvas.widthProperty().addListener((observable, oldValue, newValue) -> redrawCurrentState());
+        canvas.heightProperty().addListener((observable, oldValue, newValue) -> redrawCurrentState());
     }
 
     private void loadJsonFromFile() {
@@ -111,10 +134,33 @@ public class Controller {
         try {
             String jsonContent = Files.readString(selectedFile.toPath(), StandardCharsets.UTF_8);
             contentInput.setText(jsonContent);
+            simulation = null;
+            currentConfig = null;
+            currentJsonText = null;
             drawLoadedState(selectedFile);
         } catch (IOException exception) {
             showError("File read error", "Failed to read file: " + exception.getMessage());
         }
+    }
+
+    private void handleAngleSliderChanged(double degrees) {
+        updateAngleLabel(degrees);
+        if (updatingAngleSlider || simulation == null || currentConfig == null) {
+            return;
+        }
+
+        if (currentJsonText == null || !currentJsonText.equals(contentInput.getText())) {
+            try {
+                ensureSimulationLoaded();
+            } catch (IllegalArgumentException exception) {
+                showError("Invalid JSON configuration", exception.getMessage());
+                return;
+            }
+        }
+
+        stopAnimation();
+        simulation.setPhaseDegrees(degrees);
+        drawRunState();
     }
 
     private void drawPlaceholder() {
@@ -123,6 +169,17 @@ public class Controller {
         graphics.fillRect(0, 0, myCanvas.getWidth(), myCanvas.getHeight());
         graphics.setFill(Color.rgb(90, 98, 112));
         graphics.fillText("Load a JSON mechanism configuration to begin.", 20, 30);
+
+        drawPlanPlaceholder(velocityCanvas, "Velocity Plan");
+        drawPlanPlaceholder(accelerationCanvas, "Acceleration Plan");
+    }
+
+    private void drawPlanPlaceholder(Canvas canvas, String title) {
+        GraphicsContext graphics = canvas.getGraphicsContext2D();
+        graphics.setFill(Color.rgb(255, 254, 249));
+        graphics.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        graphics.setFill(Color.rgb(90, 98, 112));
+        graphics.fillText(title, 12, 22);
     }
 
     private void drawLoadedState(File file) {
@@ -134,6 +191,10 @@ public class Controller {
         graphics.fillText("JSON file loaded", 20, 30);
         graphics.fillText("File: " + file.getName(), 20, 55);
         graphics.fillText("Path: " + file.getAbsolutePath(), 20, 80);
+
+        drawPlanPlaceholder(velocityCanvas, "Velocity Plan");
+        drawPlanPlaceholder(accelerationCanvas, "Acceleration Plan");
+        updateAngleSlider(0);
     }
 
     private void toggleRunPause() {
@@ -143,17 +204,7 @@ public class Controller {
         }
 
         try {
-            String jsonText = contentInput.getText();
-            if (simulation == null || currentJsonText == null || !currentJsonText.equals(jsonText)) {
-                currentConfig = configLoader.load(jsonText);
-                currentJsonText = jsonText;
-                simulation = new MechanismSimulation(currentConfig);
-
-                if (!controlsInitialized) {
-                    canvasRenderer.initializeControls(myCanvas, currentConfig, simulation.getPositions());
-                    controlsInitialized = true;
-                }
-            }
+            ensureSimulationLoaded();
             drawRunState();
             startAnimation();
         } catch (IllegalArgumentException exception) {
@@ -161,10 +212,26 @@ public class Controller {
         }
     }
 
+    private void ensureSimulationLoaded() {
+        String jsonText = contentInput.getText();
+        if (simulation == null || currentJsonText == null || !currentJsonText.equals(jsonText)) {
+            currentConfig = configLoader.load(jsonText);
+            currentJsonText = jsonText;
+            simulation = new MechanismSimulation(currentConfig);
+            updateAngleSlider(simulation.getPhaseDegrees());
+
+            if (!controlsInitialized) {
+                canvasRenderer.initializeControls(myCanvas, this::drawRunState);
+                controlsInitialized = true;
+            }
+        }
+    }
+
     private void restartSimulation() {
         stopAnimation();
         if (simulation != null && currentConfig != null) {
             simulation.reset();
+            updateAngleSlider(simulation.getPhaseDegrees());
             drawRunState();
         } else {
             drawPlaceholder();
@@ -180,13 +247,44 @@ public class Controller {
     }
 
     private void updateDiagrams() {
-        if (simulation == null || currentConfig == null) return;
-
-        if (velocityStage != null && velocityStage.isShowing()) {
-            canvasRenderer.renderVelocityPlan(velocityCanvas, currentConfig, simulation.getPositions(), simulation.getVelocities(), simulation.getMaxVelocity());
+        if (simulation == null || currentConfig == null) {
+            return;
         }
-        if (accelerationStage != null && accelerationStage.isShowing()) {
-            canvasRenderer.renderAccelerationPlan(accelerationCanvas, currentConfig, simulation.getPositions(), simulation.getVelocities(), simulation.getAccelerations(), simulation.getMaxAcceleration());
+
+        canvasRenderer.renderVelocityPlan(
+                velocityCanvas,
+                currentConfig,
+                simulation.getPositions(),
+                simulation.getVelocities(),
+                simulation.getMaxVelocity(),
+                velocityPlanZoom
+        );
+        canvasRenderer.renderAccelerationPlan(
+                accelerationCanvas,
+                currentConfig,
+                simulation.getPositions(),
+                simulation.getVelocities(),
+                simulation.getAccelerations(),
+                simulation.getMaxAcceleration(),
+                accelerationPlanZoom
+        );
+    }
+
+    private void zoomVelocityPlan(double factor) {
+        velocityPlanZoom = clamp(velocityPlanZoom * factor, MIN_PLAN_ZOOM, MAX_PLAN_ZOOM);
+        updateDiagrams();
+    }
+
+    private void zoomAccelerationPlan(double factor) {
+        accelerationPlanZoom = clamp(accelerationPlanZoom * factor, MIN_PLAN_ZOOM, MAX_PLAN_ZOOM);
+        updateDiagrams();
+    }
+
+    private void redrawCurrentState() {
+        if (simulation != null && currentConfig != null) {
+            drawRunState();
+        } else {
+            drawPlaceholder();
         }
     }
 
@@ -204,6 +302,7 @@ public class Controller {
 
                 if (simulation != null && currentConfig != null) {
                     simulation.step(deltaSeconds);
+                    updateAngleSlider(simulation.getPhaseDegrees());
                     drawRunState();
                 }
             }
@@ -229,6 +328,17 @@ public class Controller {
         }
     }
 
+    private void updateAngleSlider(double degrees) {
+        updatingAngleSlider = true;
+        crankAngleSlider.setValue(degrees);
+        updatingAngleSlider = false;
+        updateAngleLabel(degrees);
+    }
+
+    private void updateAngleLabel(double degrees) {
+        angleValueLabel.setText(String.format("%.0f deg", degrees));
+    }
+
     private void showError(String title, String message) {
         stopAnimation();
         Alert alert = new Alert(Alert.AlertType.ERROR);
@@ -236,5 +346,9 @@ public class Controller {
         alert.setHeaderText(null);
         alert.setContentText(message);
         alert.showAndWait();
+    }
+
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
