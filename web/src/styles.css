@@ -330,6 +330,18 @@ button:active {
   font-size: 12px;
 }
 
+.panel:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.panel:fullscreen canvas {
+  min-height: 0;
+}
+
 .panel-swap-transition {
   opacity: 0.72;
   transition: opacity 160ms ease;

@@ -10,7 +10,7 @@ import "./styles.css";
 
 const planZoomFactor = 1.15;
 const minPlanZoom = 0.2;
-const maxPlanZoom = 8;
+const maxPlanZoom = 40;
 
 const viewMeta: Record<ViewType, { title: string; description: string; canvasId: string }> = {
   mechanism: {
@@ -74,6 +74,7 @@ function createVisualPanel(viewType: ViewType, position: PanelPosition): HTMLEle
       </div>
       <div class="panel-actions">
         ${createPanelActions(position)}
+        <button class="icon-button fullscreen-button" type="button" title="Fullscreen" aria-label="Fullscreen">[]</button>
       </div>
     </div>
     <canvas id="${meta.canvasId}" aria-label="${meta.title}"></canvas>
@@ -231,6 +232,7 @@ function reconnectEventHandlers(): void {
   });
 
   attachSwapButtonHandlers();
+  attachFullscreenButtonHandlers();
   attachMobileTabs();
   jsonInput.value = currentJsonText || sampleJson;
 }
@@ -280,6 +282,28 @@ function attachSwapButtonHandlers(): void {
   }
 }
 
+function attachFullscreenButtonHandlers(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".fullscreen-button")) {
+    button.addEventListener("click", () => {
+      const panel = button.closest<HTMLElement>("[data-panel]");
+      if (panel) toggleFullscreen(panel);
+    });
+  }
+}
+
+async function toggleFullscreen(panel: HTMLElement): Promise<void> {
+  try {
+    if (document.fullscreenElement === panel) {
+      await document.exitFullscreen();
+    } else {
+      await panel.requestFullscreen();
+    }
+  } finally {
+    resizeCanvases();
+    redrawCurrentState();
+  }
+}
+
 async function handleSwapClick(event: Event): Promise<void> {
   const button = event.currentTarget as HTMLButtonElement;
   const panel = button.closest<HTMLElement>("[data-panel-position]");
@@ -323,6 +347,10 @@ function initialize(): void {
   loadCurrentJson(false);
 
   window.addEventListener("resize", () => {
+    resizeCanvases();
+    redrawCurrentState();
+  });
+  document.addEventListener("fullscreenchange", () => {
     resizeCanvases();
     redrawCurrentState();
   });

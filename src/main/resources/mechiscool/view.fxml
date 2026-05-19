@@ -20,6 +20,7 @@
          </padding>
          <children>
             <Button id="LoadB" fx:id="loadB" mnemonicParsing="false" text="Load JSON" />
+            <Button id="SaveB" fx:id="saveB" mnemonicParsing="false" text="Save PDF" />
             <Button id="RunB" fx:id="runB" mnemonicParsing="false" text="Run/Pause" />
             <Button id="RestartB" fx:id="restartB" mnemonicParsing="false" text="Restart" />
             <Label text="Crank angle" />
@@ -52,6 +53,7 @@
                            <children>
                               <Button fx:id="velocityZoomOutB" mnemonicParsing="false" text="-" />
                               <Button fx:id="velocityZoomInB" mnemonicParsing="false" text="+" />
+                              <Button fx:id="velocityFullscreenB" mnemonicParsing="false" text="⛶" />
                            </children>
                         </HBox>
                      </children>
@@ -66,6 +68,7 @@
                            <children>
                               <Button fx:id="accelerationZoomOutB" mnemonicParsing="false" text="-" />
                               <Button fx:id="accelerationZoomInB" mnemonicParsing="false" text="+" />
+                              <Button fx:id="accelerationFullscreenB" mnemonicParsing="false" text="⛶" />
                            </children>
                         </HBox>
                      </children>

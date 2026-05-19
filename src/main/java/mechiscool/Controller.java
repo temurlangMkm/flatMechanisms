@@ -2,6 +2,7 @@ package mechiscool;
 
 import javafx.animation.AnimationTimer;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Alert;
@@ -9,14 +10,18 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 import javafx.stage.Window;
 import mechiscool.json.MechanismConfig;
 import mechiscool.json.MechanismConfigLoader;
 import mechiscool.render.MechanismCanvasRenderer;
 import mechiscool.render.MechanismSimulation;
+import mechiscool.render.PdfVectorExporter;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,10 +32,11 @@ import java.util.Map;
 public class Controller {
     private static final double PLAN_ZOOM_FACTOR = 1.15;
     private static final double MIN_PLAN_ZOOM = 0.2;
-    private static final double MAX_PLAN_ZOOM = 8.0;
+    private static final double MAX_PLAN_ZOOM = 120.0;
 
     private final MechanismConfigLoader configLoader = new MechanismConfigLoader();
     private final MechanismCanvasRenderer canvasRenderer = new MechanismCanvasRenderer();
+    private final PdfVectorExporter pdfExporter = new PdfVectorExporter();
     private MechanismSimulation simulation;
     private MechanismConfig currentConfig;
     private String currentJsonText;
@@ -41,12 +47,17 @@ public class Controller {
     private boolean updatingAngleSlider;
     private double velocityPlanZoom = 1.0;
     private double accelerationPlanZoom = 1.0;
+    private FullscreenPlanWindow velocityFullscreenWindow;
+    private FullscreenPlanWindow accelerationFullscreenWindow;
 
     @FXML
     private TextArea contentInput;
 
     @FXML
     private Button loadB;
+
+    @FXML
+    private Button saveB;
 
     @FXML
     private Canvas myCanvas;
@@ -79,6 +90,9 @@ public class Controller {
     private Button velocityZoomOutB;
 
     @FXML
+    private Button velocityFullscreenB;
+
+    @FXML
     private Canvas accelerationCanvas;
 
     @FXML
@@ -91,18 +105,24 @@ public class Controller {
     private Button accelerationZoomOutB;
 
     @FXML
+    private Button accelerationFullscreenB;
+
+    @FXML
     private void initialize() {
         bindCanvasToPane(myCanvas, myCanvasPane);
         bindCanvasToPane(velocityCanvas, velocityCanvasPane);
         bindCanvasToPane(accelerationCanvas, accelerationCanvasPane);
 
         loadB.setOnAction(event -> loadJsonFromFile());
+        saveB.setOnAction(event -> saveToPdf());
         runB.setOnAction(event -> toggleRunPause());
         restartB.setOnAction(event -> restartSimulation());
         velocityZoomInB.setOnAction(event -> zoomVelocityPlan(PLAN_ZOOM_FACTOR));
         velocityZoomOutB.setOnAction(event -> zoomVelocityPlan(1.0 / PLAN_ZOOM_FACTOR));
+        velocityFullscreenB.setOnAction(event -> showFullscreenPlan(PlanType.VELOCITY));
         accelerationZoomInB.setOnAction(event -> zoomAccelerationPlan(PLAN_ZOOM_FACTOR));
         accelerationZoomOutB.setOnAction(event -> zoomAccelerationPlan(1.0 / PLAN_ZOOM_FACTOR));
+        accelerationFullscreenB.setOnAction(event -> showFullscreenPlan(PlanType.ACCELERATION));
         crankAngleSlider.valueProperty().addListener((observable, oldValue, newValue) -> handleAngleSliderChanged(newValue.doubleValue()));
 
         drawPlaceholder();
@@ -251,23 +271,9 @@ public class Controller {
             return;
         }
 
-        canvasRenderer.renderVelocityPlan(
-                velocityCanvas,
-                currentConfig,
-                simulation.getPositions(),
-                simulation.getVelocities(),
-                simulation.getMaxVelocity(),
-                velocityPlanZoom
-        );
-        canvasRenderer.renderAccelerationPlan(
-                accelerationCanvas,
-                currentConfig,
-                simulation.getPositions(),
-                simulation.getVelocities(),
-                simulation.getAccelerations(),
-                simulation.getMaxAcceleration(),
-                accelerationPlanZoom
-        );
+        renderPlan(velocityCanvas, PlanType.VELOCITY);
+        renderPlan(accelerationCanvas, PlanType.ACCELERATION);
+        renderFullscreenPlans();
     }
 
     private void zoomVelocityPlan(double factor) {
@@ -280,12 +286,108 @@ public class Controller {
         updateDiagrams();
     }
 
+    private void showFullscreenPlan(PlanType planType) {
+        FullscreenPlanWindow window = planType == PlanType.VELOCITY ? velocityFullscreenWindow : accelerationFullscreenWindow;
+        if (window == null || !window.isShowing()) {
+            window = new FullscreenPlanWindow(planType);
+            if (planType == PlanType.VELOCITY) {
+                velocityFullscreenWindow = window;
+            } else {
+                accelerationFullscreenWindow = window;
+            }
+        }
+        window.show();
+        renderPlan(window.canvas, planType);
+    }
+
+    private void renderFullscreenPlans() {
+        if (velocityFullscreenWindow != null && velocityFullscreenWindow.isShowing()) {
+            renderPlan(velocityFullscreenWindow.canvas, PlanType.VELOCITY);
+        }
+        if (accelerationFullscreenWindow != null && accelerationFullscreenWindow.isShowing()) {
+            renderPlan(accelerationFullscreenWindow.canvas, PlanType.ACCELERATION);
+        }
+    }
+
+    private void saveToPdf() {
+        if (simulation == null || currentConfig == null) {
+            showError("Export PDF", "Load and run a mechanism before exporting.");
+            return;
+        }
+
+        drawRunState();
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save PDF");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PDF files", "*.pdf"));
+        fileChooser.setInitialFileName("mechiscool-export.pdf");
+
+        Window window = saveB.getScene() == null ? null : saveB.getScene().getWindow();
+        File selectedFile = fileChooser.showSaveDialog(window);
+        if (selectedFile == null) {
+            return;
+        }
+
+        File outputFile = ensurePdfExtension(selectedFile);
+        try {
+            pdfExporter.export(
+                    outputFile,
+                    currentConfig,
+                    simulation.getPositions(),
+                    simulation.getVelocities(),
+                    simulation.getAccelerations(),
+                    velocityPlanZoom,
+                    accelerationPlanZoom,
+                    simulation.getPhaseDegrees()
+            );
+        } catch (IOException exception) {
+            showError("Export PDF", "Failed to save PDF: " + exception.getMessage());
+        }
+    }
+
+    private void renderPlan(Canvas canvas, PlanType planType) {
+        if (simulation == null || currentConfig == null) {
+            drawPlanPlaceholder(canvas, planType == PlanType.VELOCITY ? "Velocity Plan" : "Acceleration Plan");
+            return;
+        }
+
+        if (planType == PlanType.VELOCITY) {
+            canvasRenderer.renderVelocityPlan(
+                    canvas,
+                    currentConfig,
+                    simulation.getPositions(),
+                    simulation.getVelocities(),
+                    simulation.getMaxVelocity(),
+                    velocityPlanZoom
+            );
+            return;
+        }
+
+        canvasRenderer.renderAccelerationPlan(
+                canvas,
+                currentConfig,
+                simulation.getPositions(),
+                simulation.getVelocities(),
+                simulation.getAccelerations(),
+                simulation.getMaxAcceleration(),
+                accelerationPlanZoom
+        );
+    }
+
     private void redrawCurrentState() {
         if (simulation != null && currentConfig != null) {
             drawRunState();
         } else {
             drawPlaceholder();
         }
+    }
+
+    private File ensurePdfExtension(File file) {
+        String name = file.getName().toLowerCase();
+        if (name.endsWith(".pdf")) {
+            return file;
+        }
+        return new File(file.getParentFile(), file.getName() + ".pdf");
     }
 
     private void createAnimationTimer() {
@@ -350,5 +452,71 @@ public class Controller {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private enum PlanType {
+        VELOCITY,
+        ACCELERATION
+    }
+
+    private class FullscreenPlanWindow {
+        private final PlanType planType;
+        private final Stage stage = new Stage();
+        private final Canvas canvas = new Canvas(960, 640);
+
+        FullscreenPlanWindow(PlanType planType) {
+            this.planType = planType;
+
+            StackPane root = new StackPane();
+            HBox controls = new HBox(4);
+            Button zoomOutB = new Button("-");
+            Button zoomInB = new Button("+");
+            Button closeB = new Button("Exit");
+
+            controls.getChildren().addAll(zoomOutB, zoomInB, closeB);
+            controls.setStyle("-fx-background-color: rgba(255,255,255,0.86); -fx-padding: 8;");
+            StackPane.setAlignment(controls, javafx.geometry.Pos.TOP_RIGHT);
+
+            root.getChildren().addAll(canvas, controls);
+            canvas.widthProperty().bind(root.widthProperty());
+            canvas.heightProperty().bind(root.heightProperty());
+            canvas.widthProperty().addListener((observable, oldValue, newValue) -> renderPlan(canvas, planType));
+            canvas.heightProperty().addListener((observable, oldValue, newValue) -> renderPlan(canvas, planType));
+
+            zoomOutB.setOnAction(event -> zoomFullscreenPlan(1.0 / PLAN_ZOOM_FACTOR));
+            zoomInB.setOnAction(event -> zoomFullscreenPlan(PLAN_ZOOM_FACTOR));
+            closeB.setOnAction(event -> stage.close());
+
+            Scene scene = new Scene(root, 960, 640);
+            scene.setOnKeyPressed(event -> {
+                if (event.getCode() == KeyCode.ESCAPE) {
+                    stage.close();
+                }
+            });
+
+            stage.setScene(scene);
+            stage.setTitle(planType == PlanType.VELOCITY ? "Velocity Plan" : "Acceleration Plan");
+            stage.setFullScreenExitHint("");
+        }
+
+        void show() {
+            if (!stage.isShowing()) {
+                stage.show();
+            }
+            stage.setFullScreen(true);
+            stage.toFront();
+        }
+
+        boolean isShowing() {
+            return stage.isShowing();
+        }
+
+        private void zoomFullscreenPlan(double factor) {
+            if (planType == PlanType.VELOCITY) {
+                zoomVelocityPlan(factor);
+            } else {
+                zoomAccelerationPlan(factor);
+            }
+        }
     }
 }
