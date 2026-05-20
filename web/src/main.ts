@@ -1,7 +1,9 @@
 import { loadMechanismConfig } from "./core/configLoader";
+import { buildNodeGraphSeries } from "./core/graphSeries";
 import { clearCanvas, MechanismCanvasRenderer } from "./core/renderer";
 import { MechanismSimulation } from "./core/simulation";
 import type { MechanismConfig } from "./core/types";
+import type { NodeGraphSeries } from "./core/graphSeries";
 import { PanelSwapper } from "./core/panelSwap";
 import type { PanelPosition, ViewType } from "./core/viewManager";
 import { ViewManager } from "./core/viewManager";
@@ -15,17 +17,17 @@ const maxPlanZoom = 40;
 const viewMeta: Record<ViewType, { title: string; description: string; canvasId: string }> = {
   mechanism: {
     title: "Чертеж механизма",
-    description: "Колесо мыши - масштаб, перетаскивание - сдвиг",
+    description: "Чертеж механизма",
     canvasId: "mechanismCanvas",
   },
   velocity: {
     title: "План скоростей",
-    description: "Отдельный масштаб и сдвиг сохраняются",
+    description: "План скоростей",
     canvasId: "velocityCanvas",
   },
   acceleration: {
     title: "План ускорений",
-    description: "Отдельный масштаб и сдвиг сохраняются",
+    description: "План ускорений",
     canvasId: "accelerationCanvas",
   },
 };
@@ -47,21 +49,42 @@ let frameHandle = 0;
 let lastFrame = 0;
 let updatingAngleSlider = false;
 let activePlanDrag: { viewType: "velocity" | "acceleration"; x: number; y: number } | null = null;
+let selectedGraphNodeId = "";
+let currentGraphSeries: NodeGraphSeries | null = null;
+let graphSeriesCache = new Map<string, NodeGraphSeries>();
 
 let jsonInput: HTMLTextAreaElement;
 let fileInput: HTMLInputElement;
 let templateSelect: HTMLSelectElement;
+let graphPointSelect: HTMLSelectElement;
 let runButton: HTMLButtonElement;
 let restartButton: HTMLButtonElement;
 let angleSlider: HTMLInputElement;
+let angleInput: HTMLInputElement;
 let angleValue: HTMLOutputElement;
 let statusBox: HTMLElement;
+let themeToggleButton: HTMLButtonElement;
 let mechanismCanvas: HTMLCanvasElement;
+let graphCanvas: HTMLCanvasElement;
 let velocityCanvas: HTMLCanvasElement;
 let accelerationCanvas: HTMLCanvasElement;
 
 function createVisualPanel(viewType: ViewType, position: PanelPosition): HTMLElement {
   const meta = viewMeta[viewType];
+  const extraContent =
+    viewType === "mechanism"
+      ? `
+    <section class="graph-panel">
+      <div class="graph-toolbar">
+        <label class="graph-select">
+          <span>Точка для графиков</span>
+          <select id="graphPointSelect" aria-label="Точка для графиков"></select>
+        </label>
+      </div>
+      <canvas id="graphCanvas" aria-label="Графики движения точки"></canvas>
+    </section>
+  `
+      : "";
   const panel = document.createElement("section");
   panel.className = `panel visual-panel ${position === "center" ? "main-panel active-mobile" : "side-panel"}`;
   panel.dataset.panel = viewType;
@@ -78,6 +101,7 @@ function createVisualPanel(viewType: ViewType, position: PanelPosition): HTMLEle
       </div>
     </div>
     <canvas id="${meta.canvasId}" aria-label="${meta.title}"></canvas>
+    ${extraContent}
     <div class="panel-hint">${meta.description}</div>
   `;
   return panel;
@@ -123,8 +147,10 @@ function buildMainHTML(): void {
         <button id="restartButton" type="button">Сброс</button>
         <label class="angle-control">
           <span>Угол кривошипа</span>
-          <input id="angleSlider" type="range" min="0" max="360" step="1" value="0" />
+          <input id="angleSlider" type="range" min="0" max="360" step="0.1" value="0" />
+          <input id="angleInput" class="angle-input" type="number" min="0" max="360" step="0.1" value="0" aria-label="Угол кривошипа" />
         </label>
+        <button id="themeToggleButton" class="theme-toggle" type="button" aria-label="Toggle theme">DARK</button>
         <output id="angleValue">0 deg</output>
       </header>
 
@@ -161,12 +187,16 @@ function reconnectEventHandlers(): void {
   jsonInput = element<HTMLTextAreaElement>("jsonInput");
   fileInput = element<HTMLInputElement>("fileInput");
   templateSelect = element<HTMLSelectElement>("templateSelect");
+  graphPointSelect = element<HTMLSelectElement>("graphPointSelect");
   runButton = element<HTMLButtonElement>("runButton");
   restartButton = element<HTMLButtonElement>("restartButton");
   angleSlider = element<HTMLInputElement>("angleSlider");
+  angleInput = element<HTMLInputElement>("angleInput");
   angleValue = element<HTMLOutputElement>("angleValue");
   statusBox = element<HTMLElement>("status");
+  themeToggleButton = element<HTMLButtonElement>("themeToggleButton");
   mechanismCanvas = element<HTMLCanvasElement>("mechanismCanvas");
+  graphCanvas = element<HTMLCanvasElement>("graphCanvas");
   velocityCanvas = element<HTMLCanvasElement>("velocityCanvas");
   accelerationCanvas = element<HTMLCanvasElement>("accelerationCanvas");
 
@@ -224,17 +254,39 @@ function reconnectEventHandlers(): void {
   angleSlider.addEventListener("input", () => {
     const degrees = Number(angleSlider.value);
     updateAngleLabel(degrees);
-    if (updatingAngleSlider || !simulation || !currentConfig) return;
-    if (currentJsonText !== jsonInput.value && !loadCurrentJson(true)) return;
-    stopAnimation();
-    simulation.setPhaseDegrees(degrees);
-    drawRunState();
+    if (updatingAngleSlider) return;
+    applyAngleControl(degrees);
   });
+
+  angleInput.addEventListener("input", () => {
+    const degrees = Number(angleInput.value);
+    updateAngleLabel(Number.isFinite(degrees) ? degrees : 0);
+    if (updatingAngleSlider || !Number.isFinite(degrees)) return;
+    applyAngleControl(degrees);
+  });
+
+  angleInput.addEventListener("change", () => {
+    const degrees = clampAngle(Number(angleInput.value));
+    updateAngleSlider(degrees);
+    applyAngleControl(degrees);
+  });
+
+  graphPointSelect.addEventListener("change", () => {
+    selectedGraphNodeId = graphPointSelect.value;
+    buildCurrentGraphSeries();
+    renderMotionGraph();
+  });
+
+  themeToggleButton.addEventListener("click", () => {
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  });
+  syncThemeToggle();
 
   attachSwapButtonHandlers();
   attachFullscreenButtonHandlers();
   attachMobileTabs();
   jsonInput.value = currentJsonText || sampleJson;
+  syncGraphPointSelect();
 }
 
 function attachPlanCanvasControls(canvas: HTMLCanvasElement, viewType: "velocity" | "acceleration"): void {
@@ -334,6 +386,7 @@ function attachMobileTabs(): void {
 }
 
 function initialize(): void {
+  initializeTheme();
   buildMainHTML();
   panelSwapper = new PanelSwapper({
     viewManager,
@@ -362,6 +415,10 @@ function loadCurrentJson(showErrors: boolean): boolean {
     currentConfig = config;
     currentJsonText = jsonInput.value;
     simulation = new MechanismSimulation(config);
+    graphSeriesCache = new Map();
+    ensureSelectedGraphNode(config);
+    syncGraphPointSelect();
+    buildCurrentGraphSeries();
     updateAngleSlider(simulation.getPhaseDegrees());
     drawRunState();
     hideStatus();
@@ -376,6 +433,7 @@ function drawRunState(): void {
   if (!simulation || !currentConfig || !renderer) return;
   renderer.render(mechanismCanvas, currentConfig, simulation.getPositions());
   updateDiagrams();
+  renderMotionGraph();
 }
 
 function updateDiagrams(): void {
@@ -435,18 +493,36 @@ function stopAnimation(): void {
 }
 
 function updateAngleSlider(degrees: number): void {
+  const normalizedDegrees = clampAngle(degrees);
   updatingAngleSlider = true;
-  angleSlider.value = String(degrees);
+  angleSlider.value = normalizedDegrees.toFixed(1);
+  angleInput.value = normalizedDegrees.toFixed(1);
   updatingAngleSlider = false;
-  updateAngleLabel(degrees);
+  updateAngleLabel(normalizedDegrees);
 }
 
 function updateAngleLabel(degrees: number): void {
-  angleValue.value = `${degrees.toFixed(0)} deg`;
+  angleValue.value = `${clampAngle(degrees).toFixed(1)} deg`;
+}
+
+function applyAngleControl(degrees: number): void {
+  if (!simulation || !currentConfig) return;
+  if (currentJsonText !== jsonInput.value && !loadCurrentJson(true)) return;
+  const normalizedDegrees = clampAngle(degrees);
+  stopAnimation();
+  simulation.setPhaseDegrees(normalizedDegrees);
+  updateAngleSlider(normalizedDegrees);
+  drawRunState();
+}
+
+function clampAngle(value: number): number {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  return Math.round(clamp(safeValue, 0, 360) * 10) / 10;
 }
 
 function clearAll(): void {
   if (!renderer) return;
+  clearCanvas(graphCanvas, "Графики движения");
   clearCanvas(mechanismCanvas, "Механизм");
   clearCanvas(velocityCanvas, "План скоростей");
   clearCanvas(accelerationCanvas, "План ускорений");
@@ -458,6 +534,7 @@ function redrawCurrentState(): void {
 }
 
 function resizeCanvases(): void {
+  resizeCanvasToDisplay(graphCanvas);
   resizeCanvasToDisplay(mechanismCanvas);
   resizeCanvasToDisplay(velocityCanvas);
   resizeCanvasToDisplay(accelerationCanvas);
@@ -467,6 +544,45 @@ function resizeCanvasToDisplay(canvas: HTMLCanvasElement): void {
   const rect = canvas.getBoundingClientRect();
   canvas.width = Math.max(1, Math.floor(rect.width));
   canvas.height = Math.max(1, Math.floor(rect.height));
+}
+
+function ensureSelectedGraphNode(config: MechanismConfig): void {
+  if (config.nodes.some((node) => node.id === selectedGraphNodeId)) return;
+  selectedGraphNodeId = config.nodes[0]?.id || "";
+}
+
+function syncGraphPointSelect(): void {
+  if (!graphPointSelect) return;
+  const nodeIds = currentConfig?.nodes.map((node) => node.id) ?? [];
+  graphPointSelect.innerHTML = nodeIds
+    .map((nodeId) => `<option value="${escapeAttribute(nodeId)}">${escapeHtml(nodeId)}</option>`)
+    .join("");
+  graphPointSelect.disabled = nodeIds.length === 0;
+  if (selectedGraphNodeId && nodeIds.includes(selectedGraphNodeId)) {
+    graphPointSelect.value = selectedGraphNodeId;
+  }
+}
+
+function buildCurrentGraphSeries(): void {
+  if (!currentConfig || !selectedGraphNodeId) {
+    currentGraphSeries = null;
+    return;
+  }
+
+  const cached = graphSeriesCache.get(selectedGraphNodeId);
+  if (cached) {
+    currentGraphSeries = cached;
+    return;
+  }
+
+  const series = buildNodeGraphSeries(currentConfig, selectedGraphNodeId);
+  graphSeriesCache.set(selectedGraphNodeId, series);
+  currentGraphSeries = series;
+}
+
+function renderMotionGraph(): void {
+  if (!renderer) return;
+  renderer.renderMotionGraphs(graphCanvas, currentGraphSeries, simulation?.getPhaseDegrees() ?? 0);
 }
 
 function showError(message: string): void {
@@ -486,6 +602,32 @@ function hideStatus(): void {
   statusBox.hidden = true;
 }
 
+function initializeTheme(): void {
+  const storedTheme = window.localStorage.getItem("mechiscool-theme");
+  if (storedTheme === "light" || storedTheme === "dark") {
+    applyTheme(storedTheme, false);
+    return;
+  }
+
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyTheme(prefersDark ? "dark" : "light", false);
+}
+
+function applyTheme(theme: "light" | "dark", persist = true): void {
+  document.documentElement.dataset.theme = theme;
+  if (persist) window.localStorage.setItem("mechiscool-theme", theme);
+  syncThemeToggle();
+  redrawCurrentState();
+}
+
+function syncThemeToggle(): void {
+  if (!themeToggleButton) return;
+  const isDark = document.documentElement.dataset.theme === "dark";
+  themeToggleButton.textContent = isDark ? "LIGHT" : "DARK";
+  themeToggleButton.setAttribute("aria-pressed", String(isDark));
+  themeToggleButton.title = isDark ? "Switch to light theme" : "Switch to dark theme";
+}
+
 function element<T extends HTMLElement>(id: string): T {
   const item = document.getElementById(id);
   if (!item) throw new Error(`Missing element #${id}`);
@@ -494,6 +636,14 @@ function element<T extends HTMLElement>(id: string): T {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
 initialize();
