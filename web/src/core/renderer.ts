@@ -266,11 +266,11 @@ export class MechanismCanvasRenderer {
       left: 54,
       top: 34,
       width: Math.max(120, canvas.width - 72),
-      height: Math.max(120, canvas.height - 52),
+      height: Math.max(210, canvas.height - 68),
     };
-    const sectionGap = 18;
-    const sectionHeight = Math.max(56, (graphArea.height - sectionGap * 2) / 3);
 
+    const sectionGap = clamp(Math.floor(canvas.height * 0.04), 20, 28);
+    const sectionHeight = Math.max(72, Math.floor((graphArea.height - sectionGap * 2) / 3));
     this.drawScalarGraph(
       graphics,
       series.displacement,
@@ -315,7 +315,8 @@ export class MechanismCanvasRenderer {
     );
 
     graphics.fillStyle = colors.text;
-    graphics.fillText(`Точка: ${series.nodeId}`, graphArea.left, canvas.height - 10);
+    const footerY = Math.min(canvas.height - 10, graphArea.top + sectionHeight * 3 + sectionGap * 2 + 18);
+    graphics.fillText(`Точка: ${series.nodeId}`, graphArea.left, footerY);
   }
 
   private drawScalarGraph(

@@ -71,20 +71,6 @@ let accelerationCanvas: HTMLCanvasElement;
 
 function createVisualPanel(viewType: ViewType, position: PanelPosition): HTMLElement {
   const meta = viewMeta[viewType];
-  const extraContent =
-    viewType === "mechanism"
-      ? `
-    <section class="graph-panel">
-      <div class="graph-toolbar">
-        <label class="graph-select">
-          <span>Точка для графиков</span>
-          <select id="graphPointSelect" aria-label="Точка для графиков"></select>
-        </label>
-      </div>
-      <canvas id="graphCanvas" aria-label="Графики движения точки"></canvas>
-    </section>
-  `
-      : "";
   const panel = document.createElement("section");
   panel.className = `panel visual-panel ${position === "center" ? "main-panel active-mobile" : "side-panel"}`;
   panel.dataset.panel = viewType;
@@ -101,7 +87,6 @@ function createVisualPanel(viewType: ViewType, position: PanelPosition): HTMLEle
       </div>
     </div>
     <canvas id="${meta.canvasId}" aria-label="${meta.title}"></canvas>
-    ${extraContent}
     <div class="panel-hint">${meta.description}</div>
   `;
   return panel;
@@ -146,9 +131,14 @@ function buildMainHTML(): void {
         <button id="runButton" class="primary-button" type="button">Запуск</button>
         <button id="restartButton" type="button">Сброс</button>
         <label class="angle-control">
-          <span>Угол кривошипа</span>
-          <input id="angleSlider" type="range" min="0" max="360" step="0.1" value="0" />
-          <input id="angleInput" class="angle-input" type="number" min="0" max="360" step="0.1" value="0" aria-label="Угол кривошипа" />
+          <span class="angle-control__label">Угол кривошипа</span>
+          <div class="angle-control__track">
+            <input id="angleSlider" type="range" min="0" max="360" step="0.1" value="0" />
+            <div class="angle-control__input-wrap">
+              <input id="angleInput" class="angle-input" type="number" min="0" max="360" step="0.1" value="0" aria-label="Угол кривошипа" />
+              <span class="angle-control__unit">deg</span>
+            </div>
+          </div>
         </label>
         <button id="themeToggleButton" class="theme-toggle" type="button" aria-label="Toggle theme">DARK</button>
         <output id="angleValue">0 deg</output>
@@ -167,6 +157,15 @@ function buildMainHTML(): void {
 
       <section id="status" class="status" hidden></section>
       <section id="workspace" class="workspace"></section>
+      <section class="graph-panel">
+        <div class="graph-toolbar">
+          <label class="graph-select">
+            <span>Точка для графиков</span>
+            <select id="graphPointSelect" aria-label="Точка для графиков"></select>
+          </label>
+        </div>
+        <canvas id="graphCanvas" aria-label="Графики движения точки"></canvas>
+      </section>
     </main>
   `;
 
